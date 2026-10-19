@@ -1,96 +1,32 @@
 (() => {
     'use strict';
+    const { $, $$, esc, SHOWS, CATEGORIES, cardHTML, state, byRating, sortBy } = window.ITV;
 
-    const BREAKING_BAD = {
-        name: 'Breaking Bad',
-        aggregateRating: 9.5,
-        interactionCount: 2680071,
-        startDate: 2008,
-        endDate: 2013,
-        numberOfSeasons: 5,
-        award: 'Won 16 Primetime Emmys. 172 wins & 269 nominations total',
-        countryOfOrigin: 'United States',
-        image: 'https://m.media-amazon.com/images/M/MV5BOWE4NTc3YmYtNmU2Mi00ZjhkLWE1MTItZmM1M2U1ODU3YjFlXkEyXkFqcGc@._V1_QL75_UY562_CR2,0,380,562_.jpg',
-        genre: 'Crime, Drama, Thriller',
-        actor: 'Bryan Cranston, Aaron Paul, Anna Gunn',
-    };
-    const PLACEHOLDER = Array.from({ length: 20 }, (_, i) => ({ ...BREAKING_BAD, id: `tt0903747-${i + 1}` }));
+    const ROW_LIMIT = 20;                                   // kartu per baris di home
+    const CATEGORY_URL = window.ITV_CATEGORY_URL || '/category/';
 
-    const USING_PLACEHOLDER = !(Array.isArray(window.ITV_SHOWS) && window.ITV_SHOWS.length);
-
-    const $  = (s, c = document) => c.querySelector(s);
-    const $$ = (s, c = document) => [...c.querySelectorAll(s)];
-    let dragged = false; // supaya habis drag carousel tidak langsung buka detail
-    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
-    const ASIA = ['Japan', 'South Korea', 'Korea', 'China', 'India', 'Thailand', 'Taiwan', 'Hong Kong', 'Philippines', 'Indonesia', 'Singapore', 'Malaysia', 'Vietnam'];
-
-    const normalize = (r) => {
-        const start = parseInt(r.startDate, 10) || 0;
-        const end = r.endDate === null || r.endDate === '' || r.endDate === undefined ? null : parseInt(r.endDate, 10);
-        const wins = ((r.award || '').match(/(\d+)\s+wins/i) || [])[1];
-        return {
-            id: r.id || r.name,
-            name: r.name || 'Untitled',
-            rating: parseFloat(r.aggregateRating) || 0,
-            votes: parseInt(r.interactionCount, 10) || 0,
-            start,
-            years: end === null ? `${start} - now` : end === start ? `${start}` : `${start} - ${end}`,
-            seasons: parseInt(r.numberOfSeasons, 10) || 0,
-            wins: wins ? parseInt(wins, 10) : 0,
-            country: r.countryOfOrigin || '',
-            image: r.image || '',
-            genre: String(r.genre || '').split(',').map((g) => g.trim()).filter(Boolean).join(', '),
-            cast: String(r.actor || '').split(',').map((g) => g.trim()).filter(Boolean).join(', '),
-        };
-    };
-
-    const SHOWS = (USING_PLACEHOLDER ? PLACEHOLDER : window.ITV_SHOWS).map(normalize);
-
-    const sortBy = (list, fn) => [...list].sort(fn);
-    const byRating = (a, b) => b.rating - a.rating || b.votes - a.votes;
-    const byVotes = (a, b) => b.votes - a.votes;
-
-    const STAR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2.5 2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 17.4 6.1 20.7l1.2-6.6L2.5 9.5l6.6-.9L12 2.5Z"/></svg>';
-    const ARROW_L = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
-    const ARROW_R = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
-
-    const cardHTML = (s) => `
-        <article class="card" tabindex="0" data-id="${esc(s.id)}">
-            <div class="card__poster">
-                <div class="card__fallback">${esc(s.name)}</div>
-                ${s.image ? `<img src="${esc(s.image)}" alt="Poster of ${esc(s.name)}" loading="lazy" draggable="false" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
-            </div>
-            <h3 class="card__title">${esc(s.name)}</h3>
-            <p class="card__years">${esc(s.years)}</p>
-            <p class="card__rating">${STAR}${s.rating.toFixed(1)}</p>
-        </article>`;
+    const ARROW_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
+    const ARROW_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
 
     const rowHTML = (r) => `
-        <section class="row reveal" id="${r.id}">
+        <section class="row reveal" id="${r.slug}">
             <div class="row__head">
                 <h2>${esc(r.title)}</h2>
-                <div class="row__arrows">
-                    <button type="button" class="arrow" data-dir="-1" aria-label="Previous">${ARROW_L}</button>
-                    <button type="button" class="arrow" data-dir="1" aria-label="Next">${ARROW_R}</button>
+                <div class="row__actions">
+                    ${r.fixed ? '' : `<a class="row__more" href="${CATEGORY_URL}${r.slug}">See more</a>`}
+                    <div class="row__arrows">
+                        <button type="button" class="arrow" data-dir="-1" aria-label="Previous">${ARROW_L}</button>
+                        <button type="button" class="arrow" data-dir="1" aria-label="Next">${ARROW_R}</button>
+                    </div>
                 </div>
             </div>
             <div class="row__track">${r.list.map(cardHTML).join('')}</div>
         </section>`;
 
-    const pick = (filterFn, sorter) => sortBy(USING_PLACEHOLDER ? SHOWS : SHOWS.filter(filterFn), sorter);
-
-    const rowsTop = [
-        { id: 'top-picks',    title: 'Top Picks',           list: sortBy(SHOWS, byRating).slice(0, 5) },
-        { id: 'popular',      title: 'Most Popular',        list: sortBy(SHOWS, byVotes) },
-        { id: 'long-running', title: 'Long-Running Series', list: pick((s) => s.seasons >= 2, (a, b) => b.seasons - a.seasons) },
-    ];
-    const rowsBottom = [
-        { id: 'awards', title: 'Award Winning', list: pick((s) => s.wins > 0, (a, b) => b.wins - a.wins) },
-        { id: 'asian',  title: 'Top Asian',     list: pick((s) => ASIA.some((c) => s.country.includes(c)), byRating) },
-    ];
-  
-    const renderRows = (target, rows) => { $(target).innerHTML = rows.filter((r) => r.list.length).map(rowHTML).join(''); };
-    renderRows('#rowsTop', rowsTop);
+    const rows = CATEGORIES
+        .map((c) => ({ slug: c.slug, title: c.title, fixed: !!c.fixed, list: c.get().slice(0, ROW_LIMIT) }))
+        .filter((r) => r.list.length);
+    $('#rows').innerHTML = rows.map(rowHTML).join('');
 
     const initRow = (row) => {
         const track = $('.row__track', row);
@@ -112,93 +48,19 @@
         let down = false, startX = 0, startLeft = 0;
         track.addEventListener('pointerdown', (e) => {
             if (e.pointerType !== 'mouse') return;
-            down = true; dragged = false; startX = e.clientX; startLeft = track.scrollLeft;
+            down = true; state.dragged = false; startX = e.clientX; startLeft = track.scrollLeft;
         });
         window.addEventListener('pointermove', (e) => {
             if (!down) return;
             const dx = e.clientX - startX;
-            if (Math.abs(dx) > 5) { dragged = true; track.classList.add('is-dragging'); }
+            if (Math.abs(dx) > 5) { state.dragged = true; track.classList.add('is-dragging'); }
             track.scrollLeft = startLeft - dx;
         });
         window.addEventListener('pointerup', () => { down = false; track.classList.remove('is-dragging'); });
     };
     $$('.row').forEach(initRow);
 
-    const input = $('#searchInput'), results = $('#results'), status = $('#searchStatus');
-
-    const runSearch = () => {
-        const q = input.value.trim().toLowerCase();
-        if (!q) { results.innerHTML = ''; status.textContent = ''; return; }
-        const list = sortBy(SHOWS.filter((s) => (/^\d{4}$/.test(q) ? String(s.start) === q : s.name.toLowerCase().includes(q))), byVotes);
-        results.innerHTML = list.length
-            ? list.slice(0, 24).map(cardHTML).join('')
-            : '<p class="results__empty">No shows found. Try another title or year.</p>';
-        status.textContent = `${list.length} show${list.length === 1 ? '' : 's'} found`;
-    };
-    let t;
-    input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(runSearch, 200); });
-
-    const DETAIL_URL = window.ITV_DETAIL_URL || '/detail/';
-    const openDetail = (card) => { if (!dragged) location.href = DETAIL_URL + encodeURIComponent(card.dataset.id); };
-    document.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) openDetail(c); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList?.contains('card')) openDetail(e.target); });
-
-    /* ---------- Autocomplete di search hero ---------- */
-const heroInput = $('#heroInput'), box = $('#heroSuggest');
-const SEARCH_URL = window.ITV_SEARCH_URL || '/search';
-let sugIdx = -1;
-
-const mark = (text, q) => {
-    const i = text.toLowerCase().indexOf(q);
-    return i < 0 ? esc(text) : esc(text.slice(0, i)) + '<mark>' + esc(text.slice(i, i + q.length)) + '</mark>' + esc(text.slice(i + q.length));
-};
-const sugScore = (s, q) => {
-    const n = s.name.toLowerCase();
-    if (n.startsWith(q)) return 3;
-    if (n.includes(q)) return 2;
-    if (String(s.start) === q || s.cast.toLowerCase().includes(q) || s.genre.toLowerCase().includes(q)) return 1;
-    return 0;
-};
-const closeSuggest = () => { box.hidden = true; box.innerHTML = ''; sugIdx = -1; };
-
-const showSuggest = () => {
-    const raw = heroInput.value.trim(), q = raw.toLowerCase();
-    if (q.length < 2) return closeSuggest();
-
-    const seen = new Set();
-    const hits = SHOWS.map((s) => [s, sugScore(s, q)]).filter(([, sc]) => sc > 0)
-        .sort((a, b) => b[1] - a[1] || b[0].votes - a[0].votes).map(([s]) => s)
-        .filter((s) => !seen.has(s.name) && seen.add(s.name))   // hilangkan judul kembar
-        .slice(0, 6);
-    if (!hits.length) return closeSuggest();
-
-    box.innerHTML = hits.map((s) => `
-        <a class="suggest__item" href="${DETAIL_URL}${encodeURIComponent(s.id)}">
-            <div class="suggest__title">${mark(s.name, q)}${s.start ? `<small>(${s.start})</small>` : ''}</div>
-            <div class="suggest__sub"><span>${mark(s.cast, q)}</span><span>${mark(s.genre, q)}</span></div>
-        </a>`).join('') +
-        `<a class="suggest__item suggest__all" href="${SEARCH_URL}?q=${encodeURIComponent(raw)}">See all results for “${esc(raw)}”</a>`;
-    box.hidden = false; sugIdx = -1;
-};
-
-let st;
-heroInput.addEventListener('input', () => { clearTimeout(st); st = setTimeout(showSuggest, 120); });
-heroInput.addEventListener('focus', showSuggest);
-heroInput.addEventListener('keydown', (e) => {
-    const items = $$('.suggest__item', box);
-    if (e.key === 'Escape') return closeSuggest();
-    if (box.hidden || !items.length) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        sugIdx = (sugIdx + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
-        items.forEach((el, i) => el.classList.toggle('is-active', i === sugIdx));
-    } else if (e.key === 'Enter' && sugIdx >= 0) {
-        e.preventDefault();
-        items[sugIdx].click();
-    }
-});
-document.addEventListener('click', (e) => { if (!e.target.closest('.search--suggest')) closeSuggest(); });
-
+    /* ---------- Collage poster di hero ---------- */
     const posters = [...new Set(sortBy(SHOWS, byRating).map((s) => s.image).filter(Boolean))];
     const tiles = $$('.collage__tile');
     if (posters.length) {
@@ -218,7 +80,8 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.search--sugg
             };
             img.src = url;
         };
-
+        // isi awal kelima tile, lalu ganti satu per satu
+        tiles.forEach(swap);
         if (posters.length > 1) {
             let k = 0;
             setInterval(() => swap(tiles[k++ % tiles.length]), 3500);

@@ -1,38 +1,9 @@
 (() => {
     'use strict';
+    const { $, esc, SHOWS, byRating, cardHTML, renderPager, getPage, setParams } = window.ITV;
 
-    /* ---------- Data (sama seperti home.js: pakai window.ITV_SHOWS, kalau kosong pakai contoh) ---------- */
-    const IMG = 'https://m.media-amazon.com/images/M/MV5BOWE4NTc3YmYtNmU2Mi00ZjhkLWE1MTItZmM1M2U1ODU3YjFlXkEyXkFqcGc@._V1_QL75_UY562_CR2,0,380,562_.jpg';
-    const DEMO_GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi'];
-    const PLACEHOLDER = DEMO_GENRES.flatMap((g, gi) => Array.from({ length: 6 }, (_, i) => ({
-        id: `demo-${gi}-${i}`, name: 'Breaking Bad', aggregateRating: 9.5 - i * 0.1, interactionCount: 2680071 - i * 1000,
-        startDate: 2008 + i, endDate: 2013 + i, numberOfSeasons: 5, countryOfOrigin: 'United States',
-        image: IMG, genre: `${g}, Drama`, actor: 'Bryan Cranston, Aaron Paul',
-    })));
-    const USING_PLACEHOLDER = !(Array.isArray(window.ITV_SHOWS) && window.ITV_SHOWS.length);
-
-    const $  = (s, c = document) => c.querySelector(s);
-    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
-
-    const normalize = (r) => {
-        const start = parseInt(r.startDate, 10) || 0;
-        const end = r.endDate === null || r.endDate === '' || r.endDate === undefined ? null : parseInt(r.endDate, 10);
-        return {
-            id: r.id || r.name,
-            name: r.name || 'Untitled',
-            rating: parseFloat(r.aggregateRating) || 0,
-            votes: parseInt(r.interactionCount, 10) || 0,
-            start,
-            years: end === null ? `${start} - now` : end === start ? `${start}` : `${start} - ${end}`,
-            seasons: parseInt(r.numberOfSeasons, 10) || 0,
-            image: r.image || '',
-            genres: String(r.genre || '').split(',').map((g) => g.trim()).filter(Boolean),
-        };
-    };
-    const SHOWS = (USING_PLACEHOLDER ? PLACEHOLDER : window.ITV_SHOWS).map(normalize);
-
-    /* ---------- Kelompokkan per genre ---------- */
-    const byRating = (a, b) => b.rating - a.rating || b.votes - a.votes;
+    const PER_PAGE = 21;                                   
+    const TILES_SHOWN = 12;                                 
     const SORTERS = {
         rating: byRating,
         votes: (a, b) => b.votes - a.votes,
@@ -40,7 +11,8 @@
         seasons: (a, b) => b.seasons - a.seasons || byRating(a, b),
     };
 
-    const GENRES = new Map(); // nama -> [shows]
+    /* ---------- Kelompokkan per genre ---------- */
+    const GENRES = new Map();
     SHOWS.forEach((s) => s.genres.forEach((g) => {
         if (!GENRES.has(g)) GENRES.set(g, []);
         GENRES.get(g).push(s);
@@ -53,22 +25,8 @@
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
-    /* ---------- Render ---------- */
-    const STAR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2.5 2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 17.4 6.1 20.7l1.2-6.6L2.5 9.5l6.6-.9L12 2.5Z"/></svg>';
-
-    const cardHTML = (s) => `
-        <article class="card" tabindex="0" data-id="${esc(s.id)}">
-            <div class="card__poster">
-                <div class="card__fallback">${esc(s.name)}</div>
-                ${s.image ? `<img src="${esc(s.image)}" alt="Poster of ${esc(s.name)}" loading="lazy" draggable="false" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
-            </div>
-            <h3 class="card__title">${esc(s.name)}</h3>
-            <p class="card__years">${esc(s.years)}</p>
-            <p class="card__rating">${STAR}${s.rating.toFixed(1)}</p>
-        </article>`;
-
-    const tileHTML = (g) => `
-        <a class="genre-tile" href="?genre=${encodeURIComponent(g.name)}" data-genre="${esc(g.name)}">
+    const tileHTML = (g, i) => `
+        <a class="genre-tile${i >= TILES_SHOWN ? ' is-extra' : ''}" href="?genre=${encodeURIComponent(g.name)}" data-genre="${esc(g.name)}">
             ${g.cover ? `<img src="${esc(g.cover)}" alt="" loading="lazy" draggable="false" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
             <span class="genre-tile__label">
                 <span class="genre-tile__name">${esc(g.name)}</span>
@@ -76,40 +34,76 @@
             </span>
         </a>`;
 
-    const grid = $('#genreGrid');
+    const grid = $('#genreGrid'), moreWrap = $('#genreMoreWrap'), moreBtn = $('#genreMore');
     grid.innerHTML = genreList.map(tileHTML).join('');
 
-    /* ---------- Hasil per genre ---------- */
-    const section = $('#genreResults'), title = $('#resultsTitle'), status = $('#resultsStatus');
-    const list = $('#genreShows'), sortSel = $('#sortSelect'), moreBtn = $('#moreBtn');
-    const PAGE = 24;
-    let current = null, sorted = [], shown = 0;
-
-    const renderMore = () => {
-        const next = sorted.slice(shown, shown + PAGE);
-        list.insertAdjacentHTML('beforeend', next.map(cardHTML).join(''));
-        shown += next.length;
-        moreBtn.hidden = shown >= sorted.length;
-        status.textContent = `Showing ${shown.toLocaleString()} of ${sorted.length.toLocaleString()} show${sorted.length === 1 ? '' : 's'}`;
+    /* ---------- See more / Show less untuk daftar genre ---------- */
+    if (genreList.length > TILES_SHOWN) {
+        grid.classList.add('is-collapsed');
+        moreBtn.addEventListener('click', () => {
+            const collapsed = grid.classList.toggle('is-collapsed');
+            moreBtn.textContent = collapsed ? 'See more' : 'Show less';
+            moreBtn.setAttribute('aria-expanded', String(!collapsed));
+        });
+    } else {
+        moreWrap.hidden = true;
+    }
+    const revealGenre = (name) => {                       
+        const i = genreList.findIndex((g) => g.name === name);
+        if (i >= TILES_SHOWN && grid.classList.contains('is-collapsed')) moreBtn.click();
     };
 
-    const showGenre = (name, { scroll = true } = {}) => {
-        const items = GENRES.get(name);
-        if (!items) return hideGenre();
-        current = name;
+    /* ---------- Hasil per genre + search + pagination ---------- */
+    const section = $('#genreResults'), title = $('#resultsTitle'), status = $('#resultsStatus');
+    const list = $('#genreShows'), sortSel = $('#sortSelect'), pager = $('#pager');
+    const qForm = $('#genreSearch'), qInput = $('#genreQ'), qClear = $('#genreClear');
+    let current = null, sorted = [], page = 1;
+
+    const apply = () => {
+        const q = qInput.value.trim().toLowerCase();
+        let items = GENRES.get(current) || [];
+        if (q) items = items.filter((s) => s.name.toLowerCase().includes(q) || s.cast.toLowerCase().includes(q));
         sorted = [...items].sort(SORTERS[sortSel.value]);
-        shown = 0; list.innerHTML = '';
-        title.textContent = name;
-        section.hidden = false;
-        document.title = `${name} — ITV`;
-        grid.querySelectorAll('.genre-tile').forEach((t) => t.classList.toggle('is-selected', t.dataset.genre === name));
-        renderMore();
+    };
+
+    const render = (scroll) => {
+        const total = sorted.length;
+        const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+        page = Math.min(Math.max(page, 1), pages);
+        const from = (page - 1) * PER_PAGE;
+        const q = qInput.value.trim();
+
+        list.innerHTML = total
+            ? sorted.slice(from, from + PER_PAGE).map(cardHTML).join('')
+            : `<p class="results__empty">No ${esc(current)} shows match “${esc(q)}”.</p>`;
+        status.textContent = total
+            ? `${(from + 1).toLocaleString()}–${Math.min(from + PER_PAGE, total).toLocaleString()} of ${total.toLocaleString()} show${total === 1 ? '' : 's'}`
+            : '';
+        renderPager(pager, {
+            page, pages,
+            onChange: (p) => { page = p; setParams({ page: p > 1 ? p : null }, 'push'); render(true); },
+        });
         if (scroll) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
     const hideGenre = () => {
         current = null; section.hidden = true; list.innerHTML = ''; document.title = 'Genre — ITV';
+        qInput.value = ''; qClear.hidden = true;
         grid.querySelectorAll('.genre-tile').forEach((t) => t.classList.remove('is-selected'));
+    };
+
+    const showGenre = (name, p = 1, scroll = true, q = qInput.value) => {
+        if (!GENRES.has(name)) return hideGenre();
+        current = name; page = p;
+        qInput.value = q; qClear.hidden = !q;
+        qInput.placeholder = `Search in ${name}...`;
+        title.textContent = name;
+        section.hidden = false;
+        document.title = `${name} — ITV`;
+        grid.querySelectorAll('.genre-tile').forEach((t) => t.classList.toggle('is-selected', t.dataset.genre === name));
+        revealGenre(name);
+        apply();
+        render(scroll);
     };
 
     grid.addEventListener('click', (e) => {
@@ -117,25 +111,37 @@
         if (!tile) return;
         e.preventDefault();
         const name = tile.dataset.genre;
-        history.pushState({ genre: name }, '', `?genre=${encodeURIComponent(name)}`);
-        showGenre(name);
+        setParams({ genre: name, page: null, q: null }, 'push');
+        showGenre(name, 1, true, '');
     });
-    sortSel.addEventListener('change', () => current && showGenre(current, { scroll: false }));
-    moreBtn.addEventListener('click', renderMore);
 
-    // tombol back/forward browser
+    sortSel.addEventListener('change', () => {
+        if (!current) return;
+        setParams({ page: null });
+        showGenre(current, 1, false);
+    });
+
+    // search di dalam genre 
+    let t;
+    const runSearch = () => {
+        if (!current) return;
+        const q = qInput.value.trim();
+        qClear.hidden = !qInput.value;
+        setParams({ q: q || null, page: null });
+        page = 1; apply(); render(false);
+    };
+    qInput.addEventListener('input', () => { clearTimeout(t); t = setTimeout(runSearch, 150); });
+    qForm.addEventListener('submit', (e) => { e.preventDefault(); clearTimeout(t); runSearch(); });
+    qClear.addEventListener('click', () => { qInput.value = ''; runSearch(); qInput.focus(); });
+
     window.addEventListener('popstate', () => {
-        const g = new URLSearchParams(location.search).get('genre');
-        g ? showGenre(g, { scroll: false }) : hideGenre();
+        const sp = new URLSearchParams(location.search);
+        const g = sp.get('genre');
+        g ? showGenre(g, getPage(), false, sp.get('q') || '') : hideGenre();
     });
 
-    // buka langsung dari URL: /genre?genre=Romance  (atau window.ITV_GENRE dari backend)
-    const initial = new URLSearchParams(location.search).get('genre') || window.ITV_GENRE;
-    if (initial) showGenre(initial, { scroll: false });
-
-    /* ---------- Klik kartu → halaman detail ---------- */
-    const DETAIL_URL = window.ITV_DETAIL_URL || '/detail/';
-    const openDetail = (card) => { location.href = DETAIL_URL + encodeURIComponent(card.dataset.id); };
-    document.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) openDetail(c); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList?.contains('card')) openDetail(e.target); });
+    // buka langsung dari URL: /genre?genre=Romance&page=2&q=love (juga dari klik genre di halaman detail)
+    const sp = new URLSearchParams(location.search);
+    const initial = sp.get('genre') || window.ITV_GENRE;
+    if (initial) showGenre(initial, getPage(), true, sp.get('q') || '');
 })();

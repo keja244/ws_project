@@ -1,23 +1,16 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ShowController;
 
-Route::get('/', function () {
-    return view('home');
-});
+Route::get('/', [ShowController::class, 'home']);
 
-Route::get('/detail/{id}', function ($id) {
-    return view('detail'); 
-});
+Route::get('/search', [ShowController::class, 'search']);
 
-Route::get('/top-rated', function () {
-    return view('top-rated');
-});
+Route::get('/genre', [ShowController::class, 'genre']);
 
-Route::get('/search', function () {
-    return view('search'); 
-});
+Route::get('/top-rated', [ShowController::class, 'topRated']);
 
-Route::get('/genre', function () {
-    return view('genre'); 
-});
+Route::get('/category/{slug}', [ShowController::class, 'category']);
+
+Route::get('/detail/{id}', [ShowController::class, 'detail']);

@@ -13,6 +13,9 @@ return [
     | a conventional file to locate the various service credentials.
     |
     */
+    'fuseki' => [
+    'endpoint' => env('FUSEKI_ENDPOINT'),
+    ],
 
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),

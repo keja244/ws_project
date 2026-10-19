@@ -2,6 +2,7 @@
     'use strict';
 
     const PLACEHOLDER = {
+        id: 'tt0903747',
         name: 'Breaking Bad',
         aggregateRating: 9.5,
         interactionCount: 2680071,
@@ -31,6 +32,10 @@
     const minutes = parseInt(r.duration, 10) || 0;
     const votes = (parseInt(r.interactionCount, 10) || 0).toLocaleString('en-US');
 
+    // link ke halaman IMDb (controller kirim r.uri; kalau tidak ada, bentuk dari id)
+    const GENRE_URL = window.ITV_GENRE_URL || '/genre';
+    const imdbUrl = r.uri || `https://www.imdb.com/title/${r.id || 'tt0903747'}/`;
+
     const award = r.award || '';
     const emmy = award.match(/Won\s+(\d+)\s+Primetime Emmys?/i);
     const wins = award.match(/(\d+)\s+wins/i);
@@ -41,7 +46,8 @@
     ].filter(Boolean);
     if (!awardLines.length && award) awardLines.push(award);
 
-    const STAR = '<svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2.5 2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 17.4 6.1 20.7l1.2-6.6L2.5 9.5l6.6-.9L12 2.5Z"/></svg>';
+    const STAR = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2.5 2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 17.4 6.1 20.7l1.2-6.6L2.5 9.5l6.6-.9L12 2.5Z"/></svg>';
+    const EXT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>';
     const sep = '<span class="sep">|</span>';
 
     document.title = `${r.name} — ITV`;
@@ -54,8 +60,11 @@
                     : `<div class="fallback">${esc(r.name)}</div>`}
             </div>
 
-            <div>
-                <h1 class="detail__title">${esc(r.name)}</h1>
+            <div class="detail__main">
+                <div class="detail__titlerow">
+                    <h1 class="detail__title">${esc(r.name)}</h1>
+                    <a class="imdb-btn" href="${esc(imdbUrl)}" target="_blank" rel="noopener noreferrer">View on IMDb ${EXT}</a>
+                </div>
                 <p class="detail__meta">${esc(years)}${r.countryOfOrigin ? `${sep}${esc(r.countryOfOrigin)}` : ''}</p>
                 <p class="detail__rating">${STAR}${(parseFloat(r.aggregateRating) || 0).toFixed(1)}/10</p>
                 <p class="detail__votes">${votes} votes<small>Based on IMDb users rating</small></p>
@@ -64,7 +73,7 @@
 
                 <section>
                     <h2>Genres</h2>
-                    <div class="chips">${list(r.genre).map((g) => `<span class="chip">${esc(g)}</span>`).join('')}</div>
+                    <div class="chips">${list(r.genre).map((g) => `<a class="chip" href="${GENRE_URL}?genre=${encodeURIComponent(g)}">${esc(g)}</a>`).join('')}</div>
                 </section>
 
                 <section class="info">
@@ -86,5 +95,4 @@
             ${r.actor ? `<section class="cast"><h2>Main Cast</h2><p>${list(r.actor).map(esc).join(sep)}</p></section>` : ''}
             ${awardLines.length ? `<div class="awards"><h2>Awards &amp; Recognition</h2>${awardLines.map((l) => `<p>${esc(l)}</p>`).join('')}</div>` : ''}
         </div>`;
-
 })();

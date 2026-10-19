@@ -1,85 +1,66 @@
-/* =========================================================
-   Genre page — dipakai BERSAMA home.css
-   (variabel, navbar, .card, .results, .footer dll sudah ada di home.css)
-   ========================================================= */
 
-/* ---------- Search di navbar ---------- */
-.search--nav { margin-left: auto; width: min(420px, 100%); padding: 0 18px; }
-.search--nav input { font-size: 15px; padding: 10px 4px; }
-
-/* ---------- Page head ---------- */
-.page-head { padding: 56px 0 8px; background: linear-gradient(180deg, var(--hero-top) 0%, var(--bg) 100%); }
-.page-head h1 { font-size: clamp(34px, 4.2vw, 58px); font-weight: 800; letter-spacing: -.02em; color: var(--lavender); }
-.page-head p { margin-top: 12px; font-size: clamp(16px, 1.5vw, 20px); font-weight: 600; color: var(--muted); }
-
-/* ---------- Genre grid ---------- */
 .genre-grid {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 56px 60px;
-    padding: 48px 0 24px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px 18px;
+    padding: 26px 0 8px;
 }
 .genre-tile {
-    position: relative; display: block; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden;
+    position: relative; display: block; aspect-ratio: 2 / 1; border-radius: 10px; overflow: hidden;
     background: var(--card); text-decoration: none; outline: none;
-    box-shadow: 0 12px 26px rgba(0, 0, 0, .45);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, .45);
     transition: transform .3s cubic-bezier(.2, .8, .2, 1), box-shadow .3s;
 }
-.genre-tile:hover, .genre-tile:focus-visible { transform: translateY(-6px); box-shadow: 0 18px 36px rgba(0, 0, 0, .65); }
-.genre-tile:focus-visible { outline: 2px solid var(--lavender); outline-offset: 3px; }
-.genre-tile.is-selected { outline: 2px solid var(--lavender); outline-offset: 3px; }
+.genre-tile:hover, .genre-tile:focus-visible { transform: translateY(-4px); box-shadow: 0 14px 28px rgba(0, 0, 0, .65); }
+.genre-tile:focus-visible, .genre-tile.is-selected { outline: 2px solid var(--lavender); outline-offset: 3px; }
 
 .genre-tile img {
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
     filter: brightness(.5); transition: filter .35s, transform .6s cubic-bezier(.2, .8, .2, 1);
 }
 .genre-tile:hover img, .genre-tile.is-selected img { filter: brightness(.7); transform: scale(1.05); }
-
-/* overlay gradient + teks di tengah (sesuai desain) */
-.genre-tile::after {
-    content: ""; position: absolute; inset: 0;
-    background: linear-gradient(180deg, rgba(18, 18, 20, .05) 0%, rgba(18, 18, 20, .45) 100%);
-}
+.genre-tile::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(18, 18, 20, .05) 0%, rgba(18, 18, 20, .45) 100%); }
 .genre-tile__label {
     position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 4px; padding: 12px; text-align: center;
-    color: var(--lavender); text-shadow: 0 2px 14px rgba(0, 0, 0, .55);
+    align-items: center; justify-content: center; gap: 2px; padding: 10px; text-align: center;
+    color: var(--lavender); text-shadow: 0 2px 12px rgba(0, 0, 0, .55);
 }
-.genre-tile__name { font-size: clamp(24px, 2.6vw, 38px); font-weight: 800; letter-spacing: -.01em; }
-.genre-tile__count { font-family: var(--font-nav); font-size: 14px; font-weight: 600; color: #fff; opacity: .8; }
+.genre-tile__name { font-size: clamp(16px, 1.6vw, 22px); font-weight: 800; letter-spacing: -.01em; }
+.genre-tile__count { font-family: var(--font-nav); font-size: 11.5px; font-weight: 600; color: #fff; opacity: .8; }
 
-/* ---------- Hasil per genre ---------- */
-.genre-results { padding: 64px 0 0; scroll-margin-top: 90px; }
-.genre-results__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-.genre-results__head h2 { font-size: clamp(28px, 3.2vw, 44px); font-weight: 800; letter-spacing: -.02em; color: var(--lavender); }
-.genre-results__status { margin-top: 6px; font-size: 15px; color: var(--muted); min-height: 22px; }
-.genre-results .results { margin-top: 28px; }
+.genre-grid.is-collapsed .genre-tile.is-extra { display: none; }
 
-.sort { display: flex; align-items: center; gap: 12px; font-family: var(--font-nav); font-size: 14px; font-weight: 600; color: var(--muted); }
+.genre-more { display: flex; justify-content: center; padding: 14px 0 0; }
+.more-btn {
+    padding: 8px 26px; border: 1.5px solid var(--lavender); border-radius: 999px; background: transparent; cursor: pointer;
+    font-family: var(--font-nav); font-size: 13.5px; font-weight: 600; color: var(--lavender);
+    transition: background .2s, color .2s;
+}
+.more-btn:hover, .more-btn:focus-visible { background: var(--lavender); color: #111; outline: none; }
+
+/* Hasil per genre */
+.genre-results { padding: 40px 0 0; scroll-margin-top: 72px; }
+.genre-results__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.genre-results__head h2 { font-size: clamp(22px, 2.4vw, 32px); font-weight: 800; letter-spacing: -.02em; color: var(--lavender); }
+.genre-results__status { margin-top: 4px; font-size: 13px; color: var(--muted); min-height: 20px; }
+.genre-results .results { margin-top: 18px; }
+.genre-results__tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+.sort { display: flex; align-items: center; gap: 10px; font-family: var(--font-nav); font-size: 13px; font-weight: 600; color: var(--muted); }
 .sort select {
     appearance: none; -webkit-appearance: none; cursor: pointer;
-    padding: 10px 40px 10px 18px; border-radius: 999px; border: 2px solid #000;
-    background: var(--lavender) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 16px center;
-    color: #111; font-family: var(--font-nav); font-size: 15px; font-weight: 600;
+    padding: 7px 34px 7px 14px; border-radius: 999px; border: 2px solid #000;
+    background: var(--lavender) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+    color: #111; font-family: var(--font-nav); font-size: 13px; font-weight: 600;
     transition: box-shadow .25s;
 }
-.sort select:focus-visible { outline: 0; box-shadow: 0 0 0 5px rgba(198, 198, 217, .22); }
+.sort select:focus-visible { outline: 0; box-shadow: 0 0 0 4px rgba(198, 198, 217, .22); }
 
-.more-wrap { display: flex; justify-content: center; margin-top: 48px; }
-.more {
-    padding: 13px 34px; border: 0; border-radius: 999px; cursor: pointer;
-    background: var(--lavender); color: #111; font-family: var(--font-nav); font-size: 15px; font-weight: 700;
-    transition: transform .2s, background .2s;
-}
-.more:hover { transform: scale(1.05); background: #fff; }
-
-/* ---------- Responsive ---------- */
-@media (max-width: 1100px) { .genre-grid { gap: 40px 36px; } }
-@media (max-width: 900px) {
-    .genre-grid { grid-template-columns: repeat(3, 1fr); gap: 32px 24px; }
-}
+@media (max-width: 1100px) { .genre-grid { gap: 22px 18px; } }
+@media (max-width: 900px) { .genre-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 640px) {
-    .search--nav { display: none; }
-    .page-head { padding-top: 36px; }
-    .genre-grid { grid-template-columns: repeat(2, 1fr); gap: 18px 14px; padding-top: 32px; }
-    .genre-tile__count { font-size: 12px; }
-    .genre-results { padding-top: 48px; }
+    .page-head { padding-top: 28px; }
+    .genre-grid { grid-template-columns: repeat(2, 1fr); gap: 12px 10px; padding-top: 20px; }
+    .genre-results__tools { width: 100%; }
+    .search--inline { flex: 1; width: auto; min-width: 0; }
+    .genre-tile__count { font-size: 11px; }
+    .genre-results { padding-top: 32px; }
 }

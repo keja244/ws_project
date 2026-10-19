@@ -1,46 +1,10 @@
 (() => {
     'use strict';
+    const { $, esc, SHOWS, byRating, STAR, renderPager, getPage, setParams } = window.ITV;
 
-    const BREAKING_BAD = {
-        name: 'Breaking Bad',
-        aggregateRating: 9.5,
-        interactionCount: 2680071,
-        startDate: 2008,
-        endDate: 2013,
-        numberOfSeasons: 5,
-        genre: 'Crime, Drama, Thriller',
-        description: "A chemistry teacher diagnosed with inoperable lung cancer turns to manufacturing and selling methamphetamine with a former student to secure his family's future.",
-        image: 'https://m.media-amazon.com/images/M/MV5BOWE4NTc3YmYtNmU2Mi00ZjhkLWE1MTItZmM1M2U1ODU3YjFlXkEyXkFqcGc@._V1_QL75_UY562_CR2,0,380,562_.jpg',
-    };
-    const PLACEHOLDER = Array.from({ length: 50 }, (_, i) => ({ ...BREAKING_BAD, id: `tt0903747-${i + 1}` }));
-
-    const $ = (s) => document.querySelector(s);
-    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
     const DETAIL_URL = window.ITV_DETAIL_URL || '/detail/';
-    const PAGE = 20;
-
-    const normalize = (r) => {
-        const start = parseInt(r.startDate, 10) || 0;
-        const end = r.endDate === null || r.endDate === '' || r.endDate === undefined ? null : parseInt(r.endDate, 10);
-        return {
-            id: r.id || r.name,
-            name: r.name || 'Untitled',
-            rating: parseFloat(r.aggregateRating) || 0,
-            votes: parseInt(r.interactionCount, 10) || 0,
-            years: end === null ? `${start} - now` : end === start ? `${start}` : `${start} - ${end}`,
-            seasons: parseInt(r.numberOfSeasons, 10) || 0,
-            genre: String(r.genre || '').split(',').map((g) => g.trim()).filter(Boolean).join(', '),
-            desc: r.description || '',
-            image: r.image || '',
-        };
-    };
-
-    const useReal = Array.isArray(window.ITV_SHOWS) && window.ITV_SHOWS.length;
-    const SHOWS = (useReal ? window.ITV_SHOWS : PLACEHOLDER)
-        .map(normalize)
-        .sort((a, b) => b.rating - a.rating || b.votes - a.votes);
-
-    const STAR = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2.5 2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 17.4 6.1 20.7l1.2-6.6L2.5 9.5l6.6-.9L12 2.5Z"/></svg>';
+    const PER_PAGE = 12;
+    const RANKED = [...SHOWS].sort(byRating);
     const sep = '<span class="sep">|</span>';
 
     const cardHTML = (s, rank) => `
@@ -59,23 +23,24 @@
             </div>
         </a>`;
 
-    const list = $('#rankList'), more = $('#rankMore'), status = $('#rankStatus'), btn = $('#rankBtn');
-    let shown = 0;
+    const list = $('#rankList'), status = $('#rankStatus'), pager = $('#rankPager');
+    let page = getPage();
 
-    const renderMore = () => {
-        const next = SHOWS.slice(shown, shown + PAGE);
-        list.insertAdjacentHTML('beforeend', next.map((s, i) => cardHTML(s, shown + i + 1)).join(''));
-        shown += next.length;
-        status.textContent = `Showing ${shown} of ${SHOWS.length}`;
-        more.hidden = shown >= SHOWS.length;
+    const render = (scroll) => {
+        const total = RANKED.length;
+        const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+        page = Math.min(Math.max(page, 1), pages);
+        const from = (page - 1) * PER_PAGE;
+
+        list.innerHTML = RANKED.slice(from, from + PER_PAGE).map((s, i) => cardHTML(s, from + i + 1)).join('');
+        status.textContent = total ? `Showing ${from + 1}–${Math.min(from + PER_PAGE, total)} of ${total.toLocaleString()}` : '';
+        renderPager(pager, {
+            page, pages,
+            onChange: (p) => { page = p; setParams({ page: p > 1 ? p : null }, 'push'); render(true); },
+        });
+        if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
     };
-    btn.addEventListener('click', renderMore);
-    renderMore();
 
-    if ('IntersectionObserver' in window) {
-        new IntersectionObserver((entries) => {
-            if (entries[0].isIntersecting && shown < SHOWS.length) renderMore();
-        }, { rootMargin: '400px' }).observe(more);
-    }
-
+    window.addEventListener('popstate', () => { page = getPage(); render(false); });
+    render(false);
 })();
