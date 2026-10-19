@@ -19,7 +19,7 @@
         <nav class="nav__links">
             <a href="{{ url('/') }}" class="nav__btn">Home</a>
             <a href="{{ url('/top-rated') }}" class="nav__btn">Top Rated</a>
-            <a href="#" class="nav__btn">Genre</a>
+            <a href="{{ url('/genre') }}" class="nav__btn">Genre</a>
         </nav>
 
         <form class="search search--nav" action="{{ url('/search') }}" method="GET" role="search">

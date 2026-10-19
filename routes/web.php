@@ -17,3 +17,7 @@ Route::get('/top-rated', function () {
 Route::get('/search', function () {
     return view('search'); 
 });
+
+Route::get('/genre', function () {
+    return view('genre'); 
+});

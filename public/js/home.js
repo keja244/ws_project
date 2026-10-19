@@ -11,6 +11,8 @@
         award: 'Won 16 Primetime Emmys. 172 wins & 269 nominations total',
         countryOfOrigin: 'United States',
         image: 'https://m.media-amazon.com/images/M/MV5BOWE4NTc3YmYtNmU2Mi00ZjhkLWE1MTItZmM1M2U1ODU3YjFlXkEyXkFqcGc@._V1_QL75_UY562_CR2,0,380,562_.jpg',
+        genre: 'Crime, Drama, Thriller',
+        actor: 'Bryan Cranston, Aaron Paul, Anna Gunn',
     };
     const PLACEHOLDER = Array.from({ length: 20 }, (_, i) => ({ ...BREAKING_BAD, id: `tt0903747-${i + 1}` }));
 
@@ -37,6 +39,8 @@
             wins: wins ? parseInt(wins, 10) : 0,
             country: r.countryOfOrigin || '',
             image: r.image || '',
+            genre: String(r.genre || '').split(',').map((g) => g.trim()).filter(Boolean).join(', '),
+            cast: String(r.actor || '').split(',').map((g) => g.trim()).filter(Boolean).join(', '),
         };
     };
 
@@ -138,6 +142,62 @@
     const openDetail = (card) => { if (!dragged) location.href = DETAIL_URL + encodeURIComponent(card.dataset.id); };
     document.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) openDetail(c); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList?.contains('card')) openDetail(e.target); });
+
+    /* ---------- Autocomplete di search hero ---------- */
+const heroInput = $('#heroInput'), box = $('#heroSuggest');
+const SEARCH_URL = window.ITV_SEARCH_URL || '/search';
+let sugIdx = -1;
+
+const mark = (text, q) => {
+    const i = text.toLowerCase().indexOf(q);
+    return i < 0 ? esc(text) : esc(text.slice(0, i)) + '<mark>' + esc(text.slice(i, i + q.length)) + '</mark>' + esc(text.slice(i + q.length));
+};
+const sugScore = (s, q) => {
+    const n = s.name.toLowerCase();
+    if (n.startsWith(q)) return 3;
+    if (n.includes(q)) return 2;
+    if (String(s.start) === q || s.cast.toLowerCase().includes(q) || s.genre.toLowerCase().includes(q)) return 1;
+    return 0;
+};
+const closeSuggest = () => { box.hidden = true; box.innerHTML = ''; sugIdx = -1; };
+
+const showSuggest = () => {
+    const raw = heroInput.value.trim(), q = raw.toLowerCase();
+    if (q.length < 2) return closeSuggest();
+
+    const seen = new Set();
+    const hits = SHOWS.map((s) => [s, sugScore(s, q)]).filter(([, sc]) => sc > 0)
+        .sort((a, b) => b[1] - a[1] || b[0].votes - a[0].votes).map(([s]) => s)
+        .filter((s) => !seen.has(s.name) && seen.add(s.name))   // hilangkan judul kembar
+        .slice(0, 6);
+    if (!hits.length) return closeSuggest();
+
+    box.innerHTML = hits.map((s) => `
+        <a class="suggest__item" href="${DETAIL_URL}${encodeURIComponent(s.id)}">
+            <div class="suggest__title">${mark(s.name, q)}${s.start ? `<small>(${s.start})</small>` : ''}</div>
+            <div class="suggest__sub"><span>${mark(s.cast, q)}</span><span>${mark(s.genre, q)}</span></div>
+        </a>`).join('') +
+        `<a class="suggest__item suggest__all" href="${SEARCH_URL}?q=${encodeURIComponent(raw)}">See all results for “${esc(raw)}”</a>`;
+    box.hidden = false; sugIdx = -1;
+};
+
+let st;
+heroInput.addEventListener('input', () => { clearTimeout(st); st = setTimeout(showSuggest, 120); });
+heroInput.addEventListener('focus', showSuggest);
+heroInput.addEventListener('keydown', (e) => {
+    const items = $$('.suggest__item', box);
+    if (e.key === 'Escape') return closeSuggest();
+    if (box.hidden || !items.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        sugIdx = (sugIdx + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items.forEach((el, i) => el.classList.toggle('is-active', i === sugIdx));
+    } else if (e.key === 'Enter' && sugIdx >= 0) {
+        e.preventDefault();
+        items[sugIdx].click();
+    }
+});
+document.addEventListener('click', (e) => { if (!e.target.closest('.search--suggest')) closeSuggest(); });
 
     const posters = [...new Set(sortBy(SHOWS, byRating).map((s) => s.image).filter(Boolean))];
     const tiles = $$('.collage__tile');

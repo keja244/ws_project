@@ -1,4 +1,8 @@
-:root { --card: #111128; --font-body: 'Plus Jakarta Sans', system-ui, sans-serif; }
+body {
+    background: var(--bg) linear-gradient(180deg, var(--hero-top) 0%, var(--bg) 480px) no-repeat;
+}
+
+:root { --card: #1c1c23; --font-body: 'Plus Jakarta Sans', system-ui, sans-serif; }
 
 .nav__inner--detail { justify-content: flex-start; }
 .search--nav { margin-left: auto; width: min(520px, 38vw); padding: 0 20px; }

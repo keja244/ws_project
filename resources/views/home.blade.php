@@ -18,7 +18,7 @@
         <nav class="nav__links">
             <a href="{{ url('/') }}" class="nav__btn">Home</a>
             <a href="{{ url('/top-rated') }}" class="nav__btn">Top Rated</a>
-            <a href="#" class="nav__btn">Genre</a>
+            <a href="{{ url('/genre') }}" class="nav__btn">Genre</a>
         </nav>
     </div>
 </header>
@@ -30,8 +30,9 @@
                 <h1>Explore the World<br>of TV Series.</h1>
                 <p>Explore thousands of TV series, discover new stories,<br>and find detailed information all in one place.</p>
 
-                <form class="search" action="{{ url('/search') }}" method="GET" role="search">
-                <input type="search" name="q" placeholder="Search TV series..." autocomplete="off" aria-label="Search TV series">
+                <form class="search search--suggest" action="{{ url('/search') }}" method="GET" role="search">
+                <input type="search" id="heroInput" name="q" placeholder="Search TV series..." autocomplete="off" aria-label="Search TV series">
+                <div class="suggest" id="heroSuggest" hidden></div>
             </form>
             </div>
 
