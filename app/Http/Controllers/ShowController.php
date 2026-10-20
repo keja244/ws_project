@@ -21,18 +21,18 @@ class ShowController extends Controller
         return array_values(array_unique(array_map([self::class, 'label'], explode('|', $concat))));
     }
 
-    // "PT49M" -> 49
-    private static function minutes(?string $iso): int
+    // "49 min" / "31S min" / "49" -> 49
+    private static function minutes(?string $v): int
     {
-        if (!$iso || !preg_match('/^PT(?:(\d+)H)?(?:(\d+)M)?/', $iso, $m)) return 0;
-        return ((int) ($m[1] ?? 0)) * 60 + (int) ($m[2] ?? 0);
+        return $v && preg_match('/\d+/', $v, $m) ? (int) $m[0] : 0;
     }
 
     private function allShows(bool $withDescription = false): array
     {
-        $all = Cache::remember('all_shows_v3', 3600, function () {
+        $all = Cache::remember('all_shows_v4', 3600, function () {
             $rows = $this->sparql->query('
                 PREFIX schema: <https://schema.org/>
+                PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
                 SELECT ?s ?name ?startDate ?endDate ?numberOfSeasons ?award ?image ?description ?rating ?votes
                     (GROUP_CONCAT(DISTINCT STR(?g); separator="|") AS ?genres)
                     (GROUP_CONCAT(DISTINCT STR(?a); separator="|") AS ?actors)
@@ -48,13 +48,10 @@ class ShowController extends Controller
                 OPTIONAL { ?s schema:genre ?g . }
                 OPTIONAL { ?s schema:actor ?a . }
                 OPTIONAL { ?s schema:countryOfOrigin ?c . }
-                OPTIONAL {
-                    ?s schema:aggregateRating ?r .
-                    ?r schema:ratingValue ?rating .
-                    OPTIONAL { ?r schema:ratingCount ?votes . }
-                }
+                OPTIONAL { ?s schema:aggregateRating ?rating . }
+                OPTIONAL { ?s schema:interactionCount ?votes . }
                 } GROUP BY ?s ?name ?startDate ?endDate ?numberOfSeasons ?award ?image ?description ?rating ?votes
-                ORDER BY DESC(?rating)
+                ORDER BY DESC(xsd:decimal(?rating))
             ');
 
             return array_map(fn ($r) => [
@@ -112,10 +109,8 @@ class ShowController extends Controller
 
         $rows = $this->sparql->query("
             PREFIX schema: <https://schema.org/>
-            SELECT ?p ?o ?rv ?rc WHERE {
+            SELECT ?p ?o WHERE {
               <$uri> ?p ?o .
-              OPTIONAL { ?o schema:ratingValue ?rv . }
-              OPTIONAL { ?o schema:ratingCount ?rc . }
             }
         ");
         abort_if(empty($rows), 404);
@@ -141,8 +136,9 @@ class ShowController extends Controller
             } elseif ($key === 'duration') {
                 $show['duration'] = self::minutes($r['o']);
             } elseif ($key === 'aggregateRating') {
-                $show['aggregateRating']  = isset($r['rv']) ? (float) $r['rv'] : 0;
-                $show['interactionCount'] = isset($r['rc']) ? (int) $r['rc'] : 0;
+                $show['aggregateRating'] = (float) $r['o'];
+            } elseif ($key === 'interactionCount') {
+                $show['interactionCount'] = (int) $r['o'];
             }
         }
         foreach ($lists as $k => $v) {
