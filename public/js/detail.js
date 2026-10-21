@@ -38,8 +38,8 @@
 
     const award = r.award || '';
     const emmy = award.match(/Won\s+(\d+)\s+Primetime Emmys?/i);
-    const wins = award.match(/(\d+)\s+wins?/i);
-    const noms = award.match(/(\d+)\s+nominations?/i);
+    const wins = award.match(/(\d+)\s+wins/i);
+    const noms = award.match(/(\d+)\s+nominations/i);
     const awardLines = [
         emmy && `${emmy[1]} Primetime Emmy Wins`,
         (wins || noms) && `${wins ? wins[1] : 0} wins | ${noms ? noms[1] : 0} nominations total`,
@@ -82,7 +82,6 @@
                         ${seasons ? `<li>${seasons} Season${seasons > 1 ? 's' : ''}</li>` : ''}
                         ${minutes ? `<li>${minutes} Minute / episode</li>` : ''}
                         ${r.contentRating ? `<li>${esc(r.contentRating)}</li>` : ''}
-                        ${r.inLanguage ? `<li>Language: ${esc(r.inLanguage)}</li>` : ''}
                     </ul>
                 </section>
             </div>
