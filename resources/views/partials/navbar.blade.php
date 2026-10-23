@@ -12,7 +12,7 @@
         {{-- Ikon search selalu ada, KECUALI di Home saat belum di-scroll.
          Klik ikon -> bar muncul. Klik isi bar -> pindah ke /search. Tombol X: hapus teks, kalau sudah kosong -> bar menutup. --}}
         <form class="search search--nav {{ $isSearch ? 'is-open' : ($isHome ? 'is-away' : '') }}" id="navSearch" action="{{ url('/search') }}" method="GET" role="search" data-live="{{ $isSearch ? 1 : 0 }}" data-home="{{ $isHome ? 1 : 0 }}">
-            <input type="search" id="navInput" name="q" value="{{ $isSearch ? request('q') : '' }}" placeholder="Search TV series..." autocomplete="off" aria-label="Search TV series" {{ $isSearch ? (count(request()->query()) ? '' : 'autofocus') : 'tabindex=-1' }}>
+            <input type="search" id="navInput" name="q" value="{{ $isSearch ? request('q') : '' }}" placeholder="Search TV series..." autocomplete="off" aria-label="Search TV series" {{ $isSearch && !count(request()->query()) ? 'autofocus' : '' }}>
             <button type="button" class="search__btn search__clear" id="navClear" aria-label="Clear search" hidden>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
             </button>

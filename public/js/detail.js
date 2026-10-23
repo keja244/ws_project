@@ -43,15 +43,15 @@
     const num = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; };
     const fmt = (n) => n.toLocaleString('en-US');
 
-    // nama orang (cast / creator) -> chip yang membuka /person?name=...
-    const personChips = (names) => `<div class="chips chips--sm">${names.map((n) =>
-        `<a class="chip chip--tag" href="${PERSON_URL}?name=${encodeURIComponent(n)}">${esc(n)}</a>`).join('')}</div>`;
-
     /*  URL halaman lain */
     const GENRE_URL = window.ITV_GENRE_URL || '/genre';
     const PLATFORM_URL = window.ITV_PLATFORM_URL || '/platform';
     const KEYWORD_URL = window.ITV_KEYWORD_URL || '/keyword';
     const PERSON_URL = window.ITV_PERSON_URL || '/person';
+
+    // nama orang (cast / creator) -> chip yang membuka /person?name=...
+    const personChips = (names) => `<div class="chips chips--sm">${names.map((n) =>
+        `<a class="chip chip--tag" href="${PERSON_URL}?name=${encodeURIComponent(n)}">${esc(n)}</a>`).join('')}</div>`;
 
     /*  Tahun & status  */
     const status = r.status || '';
@@ -122,7 +122,7 @@
     const sumAwards = winsTotal + nomsTotal;
     const winRate = sumAwards ? Math.round((winsTotal / sumAwards) * 100) : 0;
     const hasStats = sumAwards > 0;
-    // chip award 
+    // chip award
     const featuredChips = () => featured.map((f) => {
         const won = f.won > 0;
         const n = won ? f.won : f.nom;
@@ -149,7 +149,7 @@
     // baris meta di header
     const metaParts = [years, ...list(r.countryOfOrigin).slice(0, 1)].filter(Boolean);
 
-    // Similar recommendation: 12 series yang sudah dihitung server 
+    // Similar recommendation: 12 series yang sudah dihitung server
     const similar = ITV.SHOWS && !ITV.USING_PLACEHOLDER ? ITV.SHOWS : [];
 
     document.getElementById('detail').innerHTML = `
@@ -180,7 +180,11 @@
                         <p class="detail__rating">${STAR}${rating.toFixed(1)}/${best}</p>
                         <p class="detail__votes">${votes} votes<small>Based on IMDb users rating</small></p>
                     </div>
-                    ${rank ? `<div class="rankbox"><span>IMDb Rank</span><strong>#${fmt(rank)}</strong></div>` : ''}
+                    ${rank ? `
+                    <div class="rankbox">
+                        <span>IMDb Rank</span>
+                        <strong>#${fmt(rank)}</strong>
+                    </div>` : ''}
                 </div>
 
                 <hr class="line">
@@ -249,6 +253,19 @@
                 <div class="links__row">${extLinks.map(([n, u, c]) => `<a class="link-btn ${c}" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(n)} ${EXT}</a>`).join('')}</div>
             </section>` : ''}
 
+            ${r.tmdbId ? `<section class="reviews" id="reviews" data-tmdb-id="${esc(r.tmdbId)}">
+                <div class="reviews__head">
+                    <h2>Reviews</h2>
+                    <span class="reviews__count" id="reviewCount" hidden></span>
+                </div>
+                <div class="reviews__list" id="reviewList" aria-live="polite">
+                    <div class="rv rv--skeleton"></div>
+                    <div class="rv rv--skeleton"></div>
+                </div>
+                <button type="button" class="reviews__more" id="reviewMore" hidden>Show more</button>
+                <p class="reviews__src">Reviews are provided by TMDB users.</p>
+            </section>` : ''}
+
             <p class="detail__ids">${[
                 r.imdbId && `IMDb ID: ${esc(r.imdbId)}`,
                 r.tmdbId && `TMDB ID: ${esc(r.tmdbId)}`,
@@ -288,5 +305,103 @@
             track.scrollLeft = startLeft - dx;
         });
         window.addEventListener('pointerup', () => { down = false; track.classList.remove('is-dragging'); });
+    }
+
+    /*  Reviews (TMDB lewat /api/reviews/{id}, tidak disimpan ke database)  */
+    const rvRoot = document.getElementById('reviews');
+    if (rvRoot) {
+        const rvList = rvRoot.querySelector('#reviewList');
+        const rvMore = rvRoot.querySelector('#reviewMore');
+        const rvCount = rvRoot.querySelector('#reviewCount');
+        const STEP = 3;
+        let reviews = [], shown = 0;
+
+        const avatarUrl = (p) => {
+            p = typeof p === 'string' ? p : '';
+            return !p ? '' : p.startsWith('/http') ? p.slice(1) : `https://image.tmdb.org/t/p/w92${p}`;
+        };
+        const fmtDate = (d) => {
+            const t = new Date(d);
+            return isNaN(t) ? '' : t.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        };
+        // Markdown ringan: **tebal**, __tebal__, *miring*, _miring_ (teks di-escape dulu, jadi aman)
+        const md = (s) => esc(s)
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/__(.+?)__/g, '<strong>$1</strong>')
+            .replace(/(^|[^*\w])\*(?!\s)([^*\n]+?)\*(?!\*)/g, '$1<em>$2</em>')
+            .replace(/(^|\W)_(?!\s)([^_\n]+?)_(?!\w)/g, '$1<em>$2</em>');
+        const rvStar = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8L12 2.5z"/></svg>';
+
+        const rvCard = (x) => {
+            const content = String(x.content ?? '').trim();
+            const name = String(x.author || x.user || 'Anonymous');
+            const av = avatarUrl(x.avatar);
+            return `
+            <article class="rv">
+                <header class="rv__top">
+                    <div class="rv__avatar">${av
+                        ? `<img src="${esc(av)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
+                        : ''}<span>${esc(name.charAt(0).toUpperCase())}</span></div>
+                    <div class="rv__who">
+                        <strong>${esc(name)}</strong>
+                        <small>${esc(fmtDate(x.date))}</small>
+                    </div>
+                    ${x.rating != null && !isNaN(Number(x.rating)) ? `<div class="rv__rate">${rvStar}${Number(x.rating).toFixed(1)}</div>` : ''}
+                </header>
+                <p class="rv__text is-clamped">${md(content)}</p>
+                <button type="button" class="rv__toggle" hidden>Show more</button>
+            </article>`;
+        };
+
+        // tombol "Show more" hanya untuk review yang benar-benar terpotong
+        const fitToggles = () => {
+            rvList.querySelectorAll('.rv:not([data-checked])').forEach((a) => {
+                a.dataset.checked = '1';
+                const p = a.querySelector('.rv__text');
+                const b = a.querySelector('.rv__toggle');
+                if (!p || !b) return;
+                if (p.scrollHeight <= p.clientHeight + 1) {
+                    p.classList.remove('is-clamped');
+                    b.remove();
+                } else {
+                    b.hidden = false;
+                }
+            });
+        };
+
+        const rvRender = () => {
+            const next = reviews.slice(shown, shown + STEP);
+            rvList.insertAdjacentHTML('beforeend', next.map(rvCard).join(''));
+            fitToggles();
+            shown += next.length;
+            rvMore.hidden = shown >= reviews.length;
+        };
+        const rvMessage = (text) => { rvList.innerHTML = `<p class="reviews__empty">${text}</p>`; };
+
+        rvList.addEventListener('click', (e) => {
+            const b = e.target.closest('.rv__toggle');
+            if (!b) return;
+            const open = b.previousElementSibling.classList.toggle('is-clamped') === false;
+            b.textContent = open ? 'Show less' : 'Show more';
+        });
+        rvMore.addEventListener('click', rvRender);
+
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 10000);
+        fetch(`/api/reviews/${encodeURIComponent(rvRoot.dataset.tmdbId)}`, { signal: ctrl.signal, headers: { Accept: 'application/json' } })
+            .then((res) => { if (!res.ok) throw new Error(res.status); return res.json(); })
+            .then((d) => {
+                reviews = (d.reviews || []).filter((x) => x && String(x.content ?? '').trim());
+                rvList.innerHTML = '';
+                if (!reviews.length) return rvMessage('No reviews for this series yet.');
+                rvCount.textContent = d.total || reviews.length;
+                rvCount.hidden = false;
+                rvRender();
+            })
+            .catch((err) => {
+                console.error('[Reviews]', err);
+                rvMessage('Reviews could not be loaded right now. Please try again later.');
+            })
+            .finally(() => clearTimeout(timer));
     }
 })();

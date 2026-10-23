@@ -1,12 +1,13 @@
 /* Navbar & search.
-   - Navbar: search tampil sebagai ikon. Klik ikon -> bar muncul DAN langsung bisa mengetik.
+   - Navbar: search tampil sebagai bar (pill) seperti di hero.
    - Mengetik huruf pertama di halaman mana pun -> pindah ke /search (mode mengetik: saran terbuka,
-     teks yang sudah diketik dipulihkan lewat draft). Klik isi bar yang sudah terbuka juga pindah ke /search.
+     teks yang sudah diketik dipulihkan lewat draft). Klik isi bar juga pindah ke /search.
    - Enter -> /search?q=... (hasil lengkap, tanpa dropdown saran).
-   - Tombol filter (corong) muncul di kanan bar begitu bar terbuka, di semua halaman.
+   - Tombol filter (corong) selalu ada di kanan bar.
      Di /search ia membuka/menutup panel filter; di halaman lain ia pindah ke /search?filters=1.
-   - Ikon search selalu ada, kecuali di Home saat posisi paling atas (belum di-scroll).
-   - Tombol X selalu ada selama bar terbuka: ada teks -> hapus teks; sudah kosong -> bar menutup.
+   - Di Home (desktop), search navbar disembunyikan selama search hero masih terlihat di layar,
+     dan muncul begitu search hero keluar dari viewport (IntersectionObserver).
+   - Tombol X hanya tampil kalau ada teks: klik -> hapus teks.
    - Event untuk search.js: 'itv:search-toggle', 'itv:filter-toggle'; dari search.js: 'itv:filter-count', 'itv:filter-state'. */
 (() => {
     'use strict';
@@ -58,44 +59,40 @@
     const home = form.dataset.home === '1';        // halaman Home
     const isOpen = () => form.classList.contains('is-open');
 
-    // X selalu tampil selama bar terbuka
-    const sync = () => { clear.hidden = !isOpen(); };
+    // X hanya tampil kalau ada teks
+    const sync = () => { clear.hidden = !input.value; };
 
-    /* Ikon disembunyikan hanya di Home saat di paling atas. Selain itu selalu tampil. */
-    const AWAY_BELOW = 120;
+    /* Home: search navbar disembunyikan selama search hero masih terlihat.
+       (CSS .is-away hanya berlaku di desktop; di mobile search navbar selalu tampil.) */
+    let heroVisible = !!hero;
     const updateAway = () => {
-        if (!home || isOpen() || input.value) return form.classList.remove('is-away');
-        form.classList.toggle('is-away', window.scrollY <= AWAY_BELOW);
+        if (!home || !hero || isOpen() || input.value) return form.classList.remove('is-away');
+        form.classList.toggle('is-away', heroVisible);
     };
 
-    /* Fokus ke input sesudah bar dibuka. */
-    const focusInput = () => {
-        const tryFocus = () => {
-            const a = document.activeElement;
-            if (isOpen() && a !== input && (a === document.body || form.contains(a))) input.focus({ preventScroll: true });
-        };
-        tryFocus();
-        requestAnimationFrame(tryFocus);
-        setTimeout(tryFocus, 120);
-        setTimeout(tryFocus, 380);
-    };
+    if (home && hero && 'IntersectionObserver' in window) {
+        new IntersectionObserver(([entry]) => {
+            heroVisible = entry.isIntersecting;
+            updateAway();
+        }, { rootMargin: '-68px 0px 0px 0px' }).observe(hero);   // 68px = tinggi navbar sticky
+    }
 
     const setOpen = (open, focus = true) => {
         form.classList.toggle('is-open', open);
         if (nav) nav.classList.toggle('is-searching', open);
         toggle.setAttribute('aria-expanded', String(open));
-        input.tabIndex = open ? 0 : -1;
         if (!open) draft.clear();
         sync();
         updateAway();
-        if (open && focus) focusInput();
+        if (open && focus) input.focus({ preventScroll: true });
         document.dispatchEvent(new CustomEvent('itv:search-toggle', { detail: { open } }));
     };
 
-    // ikon: tutup -> buka (langsung bisa mengetik); terbuka -> kirim pencarian
+    // ikon: ada teks -> kirim pencarian; kosong -> di /search fokus ke input, di halaman lain pindah ke /search
     toggle.addEventListener('click', () => {
-        if (!isOpen()) return setOpen(true);
-        form.requestSubmit ? form.requestSubmit() : form.submit();
+        if (input.value.trim()) return form.requestSubmit ? form.requestSubmit() : form.submit();
+        if (live) return input.focus();
+        goSearch(form, input);
     });
 
     // tombol filter
@@ -121,16 +118,11 @@
         if (!live && input.value.trim()) goSearch(form, input);
     });
 
-    // X: ada teks -> hapus teks. Sudah kosong -> tutup bar.
+    // X: hapus teks, fokus tetap di input
     clear.addEventListener('click', () => {
-        if (input.value) {
-            input.value = '';
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.focus();
-            return;
-        }
-        setOpen(false, false);
-        input.blur();
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
     });
 
     /* Halaman /search: pulihkan draft, bar terbuka */
@@ -147,21 +139,8 @@
     }
 
     /*  Halaman lain  */
-    // klik isi bar (yang sudah terbuka) -> halaman search
-    input.addEventListener('click', () => { if (isOpen()) goSearch(form, input); });
-
-    // klik di luar / Escape -> tutup kalau kosong
-    document.addEventListener('click', (e) => {
-        if (isOpen() && !form.contains(e.target) && !input.value) setOpen(false, false);
-    });
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && isOpen()) { setOpen(false, false); input.blur(); }
-    });
-
-    let ticking = false;
-    window.addEventListener('scroll', () => {
-        if (!ticking) { ticking = true; requestAnimationFrame(() => { ticking = false; updateAway(); }); }
-    }, { passive: true });
+    // klik isi bar -> halaman search
+    input.addEventListener('click', () => goSearch(form, input));
 
     sync();
     updateAway();

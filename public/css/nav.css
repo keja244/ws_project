@@ -12,29 +12,17 @@
 .nav .nav__btn { padding: 8px 16px; }
 .nav .nav__btn::after { left: 16px; right: 16px; }
 
-/* Search di navbar */
+/* Search di navbar: tampilannya sama dengan search di hero (pill lavender + border hitam), hanya lebih kecil */
 .nav .search--nav {
-    position: relative; z-index: 2; justify-self: center; width: 100%; height: 44px;
-    padding: 0 5px 0 20px; overflow: hidden; max-height: none; opacity: 1; order: 0; grid-column: auto;
-    transition: width .32s cubic-bezier(.2, .8, .2, 1), padding .32s cubic-bezier(.2, .8, .2, 1), box-shadow .25s,
-                background-color .25s, border-color .25s, opacity .25s ease, transform .25s ease, visibility .25s;
+    position: relative; z-index: 2; justify-self: center; width: 100%; height: 46px;
+    padding: 0 6px 0 22px; overflow: hidden; max-height: none; opacity: 1; order: 0; grid-column: auto;
+    cursor: text; box-shadow: 0 8px 20px rgba(0, 0, 0, .35);
+    transition: box-shadow .25s, opacity .25s ease, transform .25s ease, visibility .25s;
 }
-.nav .search--nav input { height: 100%; padding: 0 4px; transition: opacity .2s .1s; }
-.nav .search--nav .search__btn { width: 34px; height: 34px; }
+.nav .search--nav input { height: 100%; padding: 0 4px; font-size: 15px; cursor: text; }
+.nav .search--nav .search__btn { width: 36px; height: 36px; }
 
-
-.nav .search--nav:not(.is-open) { width: 44px; padding: 0; justify-content: center; gap: 0; }
-.nav .search--nav:not(.is-open) input,
-.nav .search--nav:not(.is-open) .search__clear { flex: 0 0 0; width: 0; min-width: 0; padding: 0; opacity: 0; pointer-events: none; }
-.nav .search--nav:not(.is-open) .search__btn { width: 40px; height: 40px; }
-
-.nav .search--nav:not(.is-open) { background: transparent; border-color: transparent; box-shadow: none; }
-.nav .search--nav:not(.is-open) .search__btn { color: var(--lavender); }
-.nav .search--nav:not(.is-open) .search__btn svg { width: 22px; height: 22px; }
-.nav .search--nav:not(.is-open) .search__btn:hover { color: #fff; background: transparent; }
-.nav .search--nav:not(.is-open) .search__btn:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
-
-/* Desktop: ikon search disembunyikan di paling atas halaman, muncul setelah scroll. */
+/* Desktop: search di navbar disembunyikan di paling atas halaman, muncul setelah scroll. */
 @media (min-width: 761px) {
     .nav .search--nav.is-away { opacity: 0; transform: scale(.7); visibility: hidden; pointer-events: none; }
 }
@@ -57,15 +45,17 @@
     .nav .nav__btn::after { left: 10px; right: 10px; }
 }
 
-/*  Mobile: baris 1 = logo + ikon search, baris 2 = semua menu merata */
+/* Mobile: baris 1 = logo + search bar, baris 2 = semua menu merata */
 @media (max-width: 760px) {
     .nav .nav__inner {
         width: calc(100% - 32px); height: auto; padding: 14px 0 6px;
         grid-template-columns: repeat(4, 1fr); grid-template-rows: auto auto; gap: 12px 0;
     }
     .nav .nav__left, .nav .nav__links { display: contents; }
-    .nav .logo { grid-column: 1 / 3; grid-row: 1; justify-self: start; font-size: 30px; }
-    .nav .search--nav { grid-column: 3 / 5; grid-row: 1; justify-self: end; }
+    .nav .logo { grid-column: 1 / 2; grid-row: 1; justify-self: start; font-size: 30px; }
+    .nav .search--nav { grid-column: 2 / 5; grid-row: 1; justify-self: stretch; height: 42px; padding: 0 5px 0 18px; }
+    .nav .search--nav input { font-size: 14px; }
+    .nav .search--nav .search__btn { width: 32px; height: 32px; }
     .nav .nav__btn { grid-row: 2; justify-self: center; padding: 10px 6px; font-size: 14px; }
     .nav .nav__btn::after { left: 6px; right: 6px; }
 
@@ -78,6 +68,7 @@
     .nav .nav__btn::after { left: 4px; right: 4px; }
     .search--hero { margin-top: 22px; }
 }
+
 /* Tombol filter (di kanan ikon search, di dalam bar) */
 .nav .search--nav .search__filter { position: relative; margin-left: 2px; border-left: 1px solid rgba(0, 0, 0, .18); border-radius: 0 50% 50% 0; width: 36px; }
 .nav .search--nav .search__filter.is-active { background: #111; color: var(--lavender); border-radius: 50%; }
@@ -87,5 +78,3 @@
     background: #111; color: var(--lavender); font: 700 10px/15px var(--font-nav); text-align: center;
 }
 .search__filter.is-active .search__badge { background: var(--lavender); color: #111; }
-/* bar tertutup, tombol filter gaikut muncul */
-.nav .search--nav:not(.is-open) .search__filter { display: none; }

@@ -1,5 +1,7 @@
+
 (() => {
     'use strict';
+
     const { $, esc, SHOWS, byRating, STAR, renderPager, getPage, setParams } = window.ITV;
 
     const DETAIL_URL = window.ITV_DETAIL_URL || '/detail/';
@@ -7,8 +9,16 @@
     const RANKED = [...SHOWS].sort(byRating);
     const sep = '<span class="sep">|</span>';
 
+    const params = new URLSearchParams(window.location.search);
+    const targetId = params.get('id');
+
+    const targetIndex = targetId
+        ? RANKED.findIndex(s => String(s.id) === String(targetId))
+        : -1;
+
     const cardHTML = (s, rank) => `
-        <a class="rank-card" href="${DETAIL_URL}${encodeURIComponent(s.id)}">
+        <a class="rank-card" id="rank-card-${rank}"
+           href="${DETAIL_URL}${encodeURIComponent(s.id)}">
             <span class="rank-card__no">${rank}</span>
             <div class="rank-card__poster">
                 ${s.image
@@ -23,24 +33,62 @@
             </div>
         </a>`;
 
-    const list = $('#rankList'), status = $('#rankStatus'), pager = $('#rankPager');
-    let page = getPage();
+    const list = $('#rankList');
+    const status = $('#rankStatus');
+    const pager = $('#rankPager');
 
-    const render = (scroll) => {
+    let page = targetIndex >= 0
+        ? Math.floor(targetIndex / PER_PAGE) + 1
+        : getPage();
+
+    const render = (scroll = false) => {
         const total = RANKED.length;
         const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+
         page = Math.min(Math.max(page, 1), pages);
+
         const from = (page - 1) * PER_PAGE;
 
-        list.innerHTML = RANKED.slice(from, from + PER_PAGE).map((s, i) => cardHTML(s, from + i + 1)).join('');
-        status.textContent = total ? `Showing ${from + 1}–${Math.min(from + PER_PAGE, total)} of ${total.toLocaleString()}` : '';
+        list.innerHTML = RANKED
+            .slice(from, from + PER_PAGE)
+            .map((s, i) => cardHTML(s, from + i + 1))
+            .join('');
+
+        status.textContent = total
+            ? `Showing ${from + 1}–${Math.min(from + PER_PAGE, total)} of ${total.toLocaleString()}`
+            : '';
+
         renderPager(pager, {
-            page, pages,
-            onChange: (p) => { page = p; setParams({ page: p > 1 ? p : null }, 'push'); render(true); },
+            page,
+            pages,
+            onChange: (p) => {
+                page = p;
+                setParams({ page: p > 1 ? p : null }, 'push');
+                render(true);
+            }
         });
-        if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
+
+        if (scroll) {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else if (targetIndex >= 0) {
+            const targetCard = document.getElementById(
+                `rank-card-${targetIndex + 1}`
+            );
+
+            if (targetCard) {
+                targetCard.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center'
+                });
+            }
+        }
     };
 
-    window.addEventListener('popstate', () => { page = getPage(); render(false); });
+    window.addEventListener('popstate', () => {
+        const currentParams = new URLSearchParams(window.location.search);
+        page = Math.max(1, parseInt(currentParams.get('page'), 10) || 1);
+        render(false);
+    });
+
     render(false);
 })();
