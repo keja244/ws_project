@@ -26,7 +26,7 @@ h1, h2, h3, p { margin: 0; }
 [hidden] { display: none !important; }
 .container { width: min(1120px, 100% - 48px); margin-inline: auto; }
 
-/* ---------- Navbar: logo kiri, search tengah, menu kanan ---------- */
+/* Navbar */
 .nav { position: sticky; top: 0; z-index: 50; background: var(--nav-bg); }
 .nav__inner {
     width: min(1120px, 100% - 48px); margin-inline: auto; height: 64px;
@@ -47,7 +47,7 @@ h1, h2, h3, p { margin: 0; }
 .nav__btn:hover::after, .nav .nav__btn.is-active::after { transform: scaleX(1); }
 .nav .nav__btn.is-active { color: #fff; }
 
-/* ---------- Search bar ---------- */
+/* Search bar */
 .search {
     display: flex; align-items: center; gap: 2px; max-width: 100%; padding: 1px 6px 1px 18px;
     background: var(--lavender); border: 2px solid #000; border-radius: 999px;
@@ -68,13 +68,13 @@ h1, h2, h3, p { margin: 0; }
 .search__btn:hover { background: rgba(0, 0, 0, .12); }
 .search__btn:focus-visible { outline: 2px solid #111; outline-offset: -2px; }
 
-/* ---------- Hero ---------- */
+/* Hero */
 .hero { padding: 44px 0 56px; background: linear-gradient(180deg, var(--hero-top) 0%, var(--hero-bottom) 100%); }
 .hero__grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 44px; align-items: center; }
 .hero h1 { font-size: clamp(30px, 3.5vw, 48px); font-weight: 800; line-height: 1.12; letter-spacing: -.02em; color: var(--lavender); }
 .hero p { margin-top: 18px; font-size: clamp(14px, 1.2vw, 17px); font-weight: 600; line-height: 1.7; color: var(--lavender); }
 
-/* Collage: 2 poster di belakang, 3 di depan */
+/* Collage */
 .collage { position: relative; width: 100%; aspect-ratio: 913 / 500; max-width: 400px; margin-inline: auto; }
 .collage__tile {
     position: absolute; z-index: 2; width: 29.57%; height: 66.6%;
@@ -93,7 +93,7 @@ h1, h2, h3, p { margin: 0; }
 .collage__tile.t1 img, .collage__tile.t2 img { filter: brightness(.62); }
 .collage__tile.t1:hover img, .collage__tile.t2:hover img { filter: brightness(1); }
 
-/* ---------- Rows / Carousel ---------- */
+/*  Rows / Carousel */
 .row { padding-top: 30px; }
 .row__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .row__head h2 { font-size: clamp(22px, 2.2vw, 30px); font-weight: 800; letter-spacing: -.02em; color: var(--lavender); }
@@ -122,7 +122,7 @@ h1, h2, h3, p { margin: 0; }
 .row__track::-webkit-scrollbar { display: none; }
 .row__track.is-dragging { scroll-snap-type: none; cursor: grabbing; user-select: none; }
 
-/* ---------- Card ---------- */
+/* Card */
 .card {
     flex: 0 0 calc((100% - (var(--pv) - 1) * var(--gap)) / var(--pv));
     scroll-snap-align: start; cursor: pointer; outline: none; min-width: 0;
@@ -142,7 +142,7 @@ h1, h2, h3, p { margin: 0; }
 .card__rating { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: var(--lavender); }
 .card__rating svg { width: 12px; height: 12px; color: var(--gold); filter: drop-shadow(0 0 4px rgba(255, 200, 61, .5)); }
 
-/* ---------- Halaman daftar (genre, kategori): head, grid, pagination ---------- */
+/*  Halaman daftar (genre, kategori): head, grid, pagination  */
 .page-head { padding: 36px 0 4px; background: linear-gradient(180deg, var(--hero-top) 0%, var(--bg) 100%); }
 .page-head h1 { font-size: clamp(26px, 3vw, 40px); font-weight: 800; letter-spacing: -.02em; color: var(--lavender); }
 .page-head p { margin-top: 8px; min-height: 20px; font-size: clamp(14px, 1.2vw, 16px); font-weight: 600; color: var(--muted); }
@@ -193,7 +193,6 @@ h1, h2, h3, p { margin: 0; }
         transition: max-height .25s ease, opacity .2s ease, padding .25s ease, border-width .25s ease;
     }
     .search--nav input { padding: 6px 4px; }
-    /* navbar tipis saat scroll ke bawah: baris search disembunyikan */
     .nav.is-compact .nav__inner { padding: 4px 0; row-gap: 0; }
     .nav.is-compact .search--nav { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; border-width: 0; pointer-events: none; }
 }
@@ -211,4 +210,14 @@ h1, h2, h3, p { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
     .reveal { opacity: 1; transform: none; }
+}
+
+@media (min-width: 761px) {
+    .nav__inner { grid-template-columns: auto minmax(240px, 440px) 1fr; gap: 24px; }
+}
+@media (max-width: 640px) {
+    .nav__left { gap: 2px; }
+    .nav__btn { padding: 6px 6px; font-size: 12.5px; }
+    .nav__btn::after { left: 6px; right: 6px; }
+    .nav__links { gap: 0; }
 }

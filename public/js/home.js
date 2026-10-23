@@ -2,7 +2,7 @@
     'use strict';
     const { $, $$, esc, SHOWS, CATEGORIES, cardHTML, state, byRating, sortBy } = window.ITV;
 
-    const ROW_LIMIT = 20;                                   // kartu per baris di home
+    const ROW_LIMIT = 20;  // kartu per baris di home
     const CATEGORY_URL = window.ITV_CATEGORY_URL || '/category/';
 
     const ARROW_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
@@ -60,7 +60,7 @@
     };
     $$('.row').forEach(initRow);
 
-    /* ---------- Collage poster di hero ---------- */
+    /*  Collage poster di hero  */
     const posters = [...new Set(sortBy(SHOWS, byRating).map((s) => s.image).filter(Boolean))];
     const tiles = $$('.collage__tile');
     if (posters.length) {

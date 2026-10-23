@@ -11,7 +11,7 @@
         seasons: (a, b) => b.seasons - a.seasons || byRating(a, b),
     };
 
-    /* ---------- Kelompokkan per genre ---------- */
+    /* Kelompokkan per genre */
     const GENRES = new Map();
     SHOWS.forEach((s) => s.genres.forEach((g) => {
         if (!GENRES.has(g)) GENRES.set(g, []);
@@ -37,7 +37,7 @@
     const grid = $('#genreGrid'), moreWrap = $('#genreMoreWrap'), moreBtn = $('#genreMore');
     grid.innerHTML = genreList.map(tileHTML).join('');
 
-    /* ---------- See more / Show less untuk daftar genre ---------- */
+    /*  See more / Show less untuk daftar genre  */
     if (genreList.length > TILES_SHOWN) {
         grid.classList.add('is-collapsed');
         moreBtn.addEventListener('click', () => {
@@ -53,7 +53,7 @@
         if (i >= TILES_SHOWN && grid.classList.contains('is-collapsed')) moreBtn.click();
     };
 
-    /* ---------- Hasil per genre + search + pagination ---------- */
+    /*  Hasil per genre + search + pagination  */
     const section = $('#genreResults'), title = $('#resultsTitle'), status = $('#resultsStatus');
     const list = $('#genreShows'), sortSel = $('#sortSelect'), pager = $('#pager');
     const qForm = $('#genreSearch'), qInput = $('#genreQ'), qClear = $('#genreClear');

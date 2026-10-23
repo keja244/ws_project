@@ -1,0 +1,10 @@
+
+/* nama platform bisa panjang ("Amazon Prime Video", "Disney Channel Asia") */
+#platformGrid .genre-tile__name {
+    max-width: 100%; line-height: 1.15; text-wrap: balance; overflow-wrap: anywhere;
+}
+
+/* tile tanpa cover: tetap terbaca di atas latar kartu */
+#platformGrid .genre-tile:not(:has(img)) { background: linear-gradient(135deg, #24242e, var(--card)); }
+
+#platformGrid { scroll-margin-top: 90px; }

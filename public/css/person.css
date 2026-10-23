@@ -1,0 +1,11 @@
+/* Tab peran di halaman person (All / Acting / Created by) */
+.ptabs { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 16px; padding: 3px; border-radius: 999px; background: rgba(198, 198, 217, .08); border: 1px solid rgba(198, 198, 217, .2); }
+.ptabs[hidden] { display: none; }
+.ptab {
+    padding: 7px 18px; border: 0; border-radius: 999px; background: transparent; cursor: pointer;
+    font: 600 13px var(--font-nav); color: var(--lavender); transition: background .2s, color .2s;
+}
+.ptab small { margin-left: 4px; font-weight: 500; opacity: .7; }
+.ptab:hover { background: rgba(198, 198, 217, .14); }
+.ptab.is-on { background: var(--lavender); color: #111; }
+.ptab:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }

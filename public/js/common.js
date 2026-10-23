@@ -6,7 +6,7 @@ window.ITV = (() => {
     const $$ = (s, c = document) => [...c.querySelectorAll(s)];
     const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
-    /* ---------- Data contoh (dipakai kalau window.ITV_SHOWS kosong) ---------- */
+    /*  Data contoh*/
     const IMG = 'https://m.media-amazon.com/images/M/MV5BOWE4NTc3YmYtNmU2Mi00ZjhkLWE1MTItZmM1M2U1ODU3YjFlXkEyXkFqcGc@._V1_QL75_UY562_CR2,0,380,562_.jpg';
     const DEMO_GENRES = ['Crime', 'Drama', 'Comedy', 'Sci-Fi', 'Mystery', 'Fantasy'];
     const PLACEHOLDER = Array.from({ length: 48 }, (_, i) => ({
@@ -45,7 +45,9 @@ window.ITV = (() => {
             genres,
             genre: genres.join(', '),
             cast: split(r.actor).join(', '),
+            platforms: Array.isArray(r.platform) ? r.platform : split(r.platform),
             desc: r.description || '',
+            roles: Array.isArray(r.roles) ? r.roles : [],
         };
     };
 
@@ -55,12 +57,12 @@ window.ITV = (() => {
     const byRating = (a, b) => b.rating - a.rating || b.votes - a.votes;
     const byVotes = (a, b) => b.votes - a.votes || b.rating - a.rating;
 
-    /* ---------- Kategori (dipakai home & halaman see more) ---------- */
+    /*  Kategori */
     const ASIA = ['Japan', 'South Korea', 'Korea', 'China', 'India', 'Thailand', 'Taiwan', 'Hong Kong', 'Philippines', 'Indonesia', 'Singapore', 'Malaysia', 'Vietnam'];
 
     // "Recommended by Us": isi ID IMDb (mis. 'tt0903747') untuk pilihan manual, maksimal 10.
     // Kalau dikosongkan, dipilih acak dari show ber-rating >= 8 (berubah tiap hari).
-    const RECOMMENDED_IDS = [];
+    const RECOMMENDED_IDS = ['tt0903747', 'tt0944947', 'tt4574334', 'tt7366338', 'tt2861424', 'tt1475582', 'tt7366338', 'tt0108778', 'tt0106179', 'tt0111161'];
     const REC_LIMIT = 10, TOP_LIMIT = 10;
 
     const seeded = (seed) => {
@@ -88,7 +90,6 @@ window.ITV = (() => {
         return pool.slice(0, REC_LIMIT);
     };
 
-    // fixed: true = daftar tetap 10 show, jadi tidak ada tombol "See more"
     const CATEGORIES = [
         { slug: 'recommended',  title: 'Recommended by Us',   fixed: true, get: recommended },
         { slug: 'top-picks',    title: 'Top Picks',           fixed: true, get: () => sortBy(SHOWS, byRating).slice(0, TOP_LIMIT) },
@@ -98,7 +99,7 @@ window.ITV = (() => {
         { slug: 'asian',        title: 'Top Asian',           get: () => sortBy(SHOWS.filter((s) => ASIA.some((c) => s.country.includes(c))), byRating) },
     ];
 
-    /* ---------- Kartu ---------- */
+    /*  Kartu  */
     const STAR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2.5 2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 17.4 6.1 20.7l1.2-6.6L2.5 9.5l6.6-.9L12 2.5Z"/></svg>';
 
     const cardHTML = (s) => `
@@ -112,7 +113,7 @@ window.ITV = (() => {
             <p class="card__rating">${STAR}${s.rating.toFixed(1)}</p>
         </article>`;
 
-    // klik / Enter di kartu -> halaman detail (diam kalau barusan drag carousel)
+    /*  klik / Enter di kartu -> halaman detail  */
     const state = { dragged: false };
     const DETAIL_URL = window.ITV_DETAIL_URL || '/detail/';
     const openCard = (card) => {
@@ -122,7 +123,7 @@ window.ITV = (() => {
     document.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) openCard(c); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList?.contains('card')) openCard(e.target); });
 
-    /* ---------- URL: ?page=2 dst ---------- */
+    /*  URL: ?page=2 dst  */
     const getPage = () => Math.max(1, parseInt(new URLSearchParams(location.search).get('page'), 10) || 1);
     const setParams = (obj, mode = 'replace') => {
         const u = new URL(location.href);
@@ -130,7 +131,7 @@ window.ITV = (() => {
         history[mode === 'push' ? 'pushState' : 'replaceState'](null, '', u);
     };
 
-    /* ---------- Pagination ---------- */
+    /*  Pagination  */
     const CH_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
     const CH_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
 
