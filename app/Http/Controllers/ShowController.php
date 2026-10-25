@@ -319,6 +319,7 @@ class ShowController extends Controller
             'name', 'description', 'image', 'award', 'contentRating', 'slogan',
             'startDate', 'endDate', 'numberOfSeasons', 'numberOfEpisodes',
             'status', 'rank', 'tmdbId', 'tvdbId', 'wikidataId', 'imdbId',
+            'trailer', 'thumbnailUrl', 'alternateName',
         ];
 
         $show  = ['id' => $id, 'uri' => $imdb];

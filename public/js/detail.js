@@ -77,6 +77,12 @@
     /*  Link eksternal (IMDb sudah ada tombolnya di atas)  */
     const imdbUrl = r.uri || `https://www.imdb.com/title/${r.imdbId || r.id}/`;
 
+    // Trailer (YouTube), backdrop (TMDB) & judul asli: hanya URL dari host yang diharapkan yang dipakai
+    const trailerUrl = /^https:\/\/(www\.)?youtube\.com\/watch\?v=[\w-]+$/i.test(r.trailer || '') ? r.trailer : '';
+    const backdrop = /^https:\/\/image\.tmdb\.org\//i.test(r.thumbnailUrl || '') ? r.thumbnailUrl : '';
+    const altName = r.alternateName && r.alternateName !== r.name ? r.alternateName : '';
+    const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+
     const rawLinks = list(r.links);
     const find = (re) => rawLinks.find((u) => re.test(u));
     const tmdbUrl = find(/themoviedb\.org/i) || (r.tmdbId ? `https://www.themoviedb.org/tv/${r.tmdbId}` : '');
@@ -153,6 +159,8 @@
     const similar = ITV.SHOWS && !ITV.USING_PLACEHOLDER ? ITV.SHOWS : [];
 
     document.getElementById('detail').innerHTML = `
+        ${backdrop ? `<div class="detail__backdrop" role="img" aria-label="Backdrop of ${esc(r.name)}"
+            style="background-image:linear-gradient(to top,rgba(0,0,0,.6),rgba(0,0,0,0) 65%),url('${esc(backdrop)}')"></div>` : ''}
         <div class="detail__top">
             <div class="detail__poster">
                 ${r.image
@@ -170,9 +178,13 @@
             <div class="detail__main">
                 <div class="detail__titlerow">
                     <h1 class="detail__title">${esc(r.name)}</h1>
-                    <a class="imdb-btn" href="${esc(imdbUrl)}" target="_blank" rel="noopener noreferrer">View on IMDb ${EXT}</a>
+                    <div class="detail__btns">
+                        ${trailerUrl ? `<a class="imdb-btn trailer-btn" href="${esc(trailerUrl)}" target="_blank" rel="noopener noreferrer">${PLAY} Watch Trailer</a>` : ''}
+                        <a class="imdb-btn" href="${esc(imdbUrl)}" target="_blank" rel="noopener noreferrer">View on IMDb ${EXT}</a>
+                    </div>
                 </div>
                 ${r.slogan ? `<p class="detail__slogan">“${esc(r.slogan)}”</p>` : ''}
+                ${altName ? `<p class="detail__alt">Original title: ${esc(altName)}</p>` : ''}
                 ${metaParts.length ? `<p class="detail__meta">${metaParts.map(esc).join(sep)}</p>` : ''}
 
                 <div class="detail__scorerow">
