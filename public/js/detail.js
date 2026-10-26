@@ -48,6 +48,7 @@
     const PLATFORM_URL = window.ITV_PLATFORM_URL || '/platform';
     const KEYWORD_URL = window.ITV_KEYWORD_URL || '/keyword';
     const PERSON_URL = window.ITV_PERSON_URL || '/person';
+    const TOP_RATED_URL = window.ITV_TOP_RATED_URL || '/top-rated';
 
     // nama orang (cast / creator) -> chip yang membuka /person?name=...
     const personChips = (names) => `<div class="chips chips--sm">${names.map((n) =>
@@ -181,10 +182,10 @@
                         <p class="detail__votes">${votes} votes<small>Based on IMDb users rating</small></p>
                     </div>
                     ${rank ? `
-                    <div class="rankbox">
-                        <span>IMDb Rank</span>
+                    <a class="rankbox" href="${TOP_RATED_URL}?id=${encodeURIComponent(r.id)}" title="Lihat di Top Rated">
+                        <span>RANK</span>
                         <strong>#${fmt(rank)}</strong>
-                    </div>` : ''}
+                    </a>` : ''}
                 </div>
 
                 <hr class="line">
@@ -249,10 +250,6 @@
                 <p class="awards__src">${esc(award)}</p>
             </section>` : ''}
 
-            ${extLinks.length ? `<section class="links"><h2>External Links</h2>
-                <div class="links__row">${extLinks.map(([n, u, c]) => `<a class="link-btn ${c}" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(n)} ${EXT}</a>`).join('')}</div>
-            </section>` : ''}
-
             ${r.tmdbId ? `<section class="reviews" id="reviews" data-tmdb-id="${esc(r.tmdbId)}">
                 <div class="reviews__head">
                     <h2>Reviews</h2>
@@ -262,8 +259,12 @@
                     <div class="rv rv--skeleton"></div>
                     <div class="rv rv--skeleton"></div>
                 </div>
-                <button type="button" class="reviews__more" id="reviewMore" hidden>Show more</button>
+                <nav class="reviews__pager" id="reviewPager" aria-label="Reviews pagination" hidden></nav>
                 <p class="reviews__src">Reviews are provided by TMDB users.</p>
+            </section>` : ''}
+
+            ${extLinks.length ? `<section class="links"><h2>External Links</h2>
+                <div class="links__row">${extLinks.map(([n, u, c]) => `<a class="link-btn ${c}" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(n)} ${EXT}</a>`).join('')}</div>
             </section>` : ''}
 
             <p class="detail__ids">${[
@@ -311,10 +312,10 @@
     const rvRoot = document.getElementById('reviews');
     if (rvRoot) {
         const rvList = rvRoot.querySelector('#reviewList');
-        const rvMore = rvRoot.querySelector('#reviewMore');
+        const rvPager = rvRoot.querySelector('#reviewPager');
         const rvCount = rvRoot.querySelector('#reviewCount');
-        const STEP = 3;
-        let reviews = [], shown = 0;
+        const PER_PAGE = 3;
+        let reviews = [], page = 1;
 
         const avatarUrl = (p) => {
             p = typeof p === 'string' ? p : '';
@@ -369,12 +370,36 @@
             });
         };
 
-        const rvRender = () => {
-            const next = reviews.slice(shown, shown + STEP);
-            rvList.insertAdjacentHTML('beforeend', next.map(rvCard).join(''));
+        // 1 2 3 ... 9 10 (dengan titik-titik kalau halamannya banyak)
+        const pageItems = (cur, total) => {
+            if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+            const set = [...new Set([1, total, cur - 1, cur, cur + 1])]
+                .filter((p) => p >= 1 && p <= total)
+                .sort((a, b) => a - b);
+            const out = [];
+            let last = 0;
+            set.forEach((p) => { if (p - last > 1) out.push('…'); out.push(p); last = p; });
+            return out;
+        };
+
+        const rvPagerRender = () => {
+            const pages = Math.ceil(reviews.length / PER_PAGE);
+            rvPager.hidden = pages <= 1;
+            if (pages <= 1) { rvPager.innerHTML = ''; return; }
+            rvPager.innerHTML =
+                `<button type="button" class="rvpg" data-page="${page - 1}" aria-label="Previous page"${page === 1 ? ' disabled' : ''}>${ARROW_L}</button>` +
+                pageItems(page, pages).map((p) => p === '…'
+                    ? '<span class="rvpg rvpg--gap">…</span>'
+                    : `<button type="button" class="rvpg${p === page ? ' is-active' : ''}" data-page="${p}"${p === page ? ' aria-current="page"' : ''}>${p}</button>`).join('') +
+                `<button type="button" class="rvpg" data-page="${page + 1}" aria-label="Next page"${page === pages ? ' disabled' : ''}>${ARROW_R}</button>`;
+        };
+
+        const rvRender = (scroll = false) => {
+            const from = (page - 1) * PER_PAGE;
+            rvList.innerHTML = reviews.slice(from, from + PER_PAGE).map(rvCard).join('');
             fitToggles();
-            shown += next.length;
-            rvMore.hidden = shown >= reviews.length;
+            rvPagerRender();
+            if (scroll) rvRoot.scrollIntoView({ behavior: 'smooth', block: 'start' });
         };
         const rvMessage = (text) => { rvList.innerHTML = `<p class="reviews__empty">${text}</p>`; };
 
@@ -384,7 +409,15 @@
             const open = b.previousElementSibling.classList.toggle('is-clamped') === false;
             b.textContent = open ? 'Show less' : 'Show more';
         });
-        rvMore.addEventListener('click', rvRender);
+
+        rvPager.addEventListener('click', (e) => {
+            const b = e.target.closest('.rvpg[data-page]');
+            if (!b || b.disabled) return;
+            const p = parseInt(b.dataset.page, 10);
+            if (!p || p === page) return;
+            page = p;
+            rvRender(true);
+        });
 
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 10000);

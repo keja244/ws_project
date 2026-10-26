@@ -1,13 +1,45 @@
-
 (() => {
     'use strict';
 
-    const { $, esc, SHOWS, byRating, STAR, renderPager, getPage, setParams } = window.ITV;
+    const { $, esc, SHOWS, STAR, renderPager, getPage, setParams } = window.ITV;
 
     const DETAIL_URL = window.ITV_DETAIL_URL || '/detail/';
     const PER_PAGE = 12;
-    const RANKED = [...SHOWS].sort(byRating);
     const sep = '<span class="sep">|</span>';
+
+    // ---------- Perhitungan rank sendiri (berdasarkan data TTL) ----------
+    // Jumlah vote = schema:ratingCount di TTL
+    const votesOf = (s) => Number(s.votes ?? s.ratingCount ?? s.rating_count ?? 0) || 0;
+    const ratingOf = (s) => Number(s.rating) || 0;
+
+    // Hanya series yang punya rating yang ikut dihitung
+    const RATED = SHOWS.filter(s => ratingOf(s) > 0);
+
+    // C = rata-rata rating seluruh series
+    const C = RATED.reduce((sum, s) => sum + ratingOf(s), 0) / (RATED.length || 1);
+
+    // m = minimum vote (persentil ke-75 dari jumlah vote)
+    const sortedVotes = RATED.map(votesOf).sort((a, b) => a - b);
+    const M = sortedVotes[Math.floor(sortedVotes.length * 0.75)] || 1;
+
+    // Weighted rating (Bayesian)
+    const score = (s) => {
+        const v = votesOf(s);
+        return (v / (v + M)) * ratingOf(s) + (M / (v + M)) * C;
+    };
+
+    // Urutan: skor WR desc -> rating desc -> vote desc -> nama A-Z
+    const compareRank = (a, b) =>
+        score(b) - score(a) ||
+        ratingOf(b) - ratingOf(a) ||
+        votesOf(b) - votesOf(a) ||
+        String(a.name).localeCompare(String(b.name));
+
+    const RANKED = [...RATED].sort(compareRank);
+
+    // Simpan rank hasil hitung kita agar bisa dipakai tempat lain
+    RANKED.forEach((s, i) => { s.ourRank = i + 1; s.score = score(s); });
+    // ---------------------------------------------------------------------
 
     const params = new URLSearchParams(window.location.search);
     const targetId = params.get('id');
@@ -28,7 +60,7 @@
             <div class="rank-card__body">
                 <h2 class="rank-card__title">${esc(s.name)}</h2>
                 <p class="rank-card__meta">${esc(s.years)}${s.seasons ? `${sep}${s.seasons} Season${s.seasons > 1 ? 's' : ''}` : ''}${s.genre ? `${sep}${esc(s.genre)}` : ''}</p>
-                <p class="rank-card__rating">${STAR}${s.rating.toFixed(1)}/10</p>
+                <p class="rank-card__rating">${STAR}${s.rating.toFixed(1)}/10${votesOf(s) ? `${sep}${votesOf(s).toLocaleString()} votes` : ''}</p>
                 ${s.desc ? `<p class="rank-card__desc">${esc(s.desc)}</p>` : ''}
             </div>
         </a>`;

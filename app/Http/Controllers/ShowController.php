@@ -165,6 +165,60 @@ class ShowController extends Controller
     }
 
     /**
+     * Rank sama persis dengan top-rated.js:
+     * Weighted Rating (Bayesian) -> rating desc -> votes desc -> nama A-Z.
+     * Return: ['tt0903747' => 1, 'tt0944947' => 2, ...]
+     */
+    private function ranks(): array
+    {
+        return Cache::remember('show_ranks_v1', 3600, function () {
+            $rated = array_values(array_filter(
+                $this->loadShows(),
+                fn ($s) => $s['aggregateRating'] > 0
+            ));
+            if (!$rated) return [];
+
+            $n = count($rated);
+
+            // C = rata-rata rating seluruh series
+            $C = array_sum(array_column($rated, 'aggregateRating')) / $n;
+
+            // M = persentil ke-75 dari jumlah vote (minimal 1)
+            $votes = array_column($rated, 'interactionCount');
+            sort($votes);
+            $M = $votes[(int) floor($n * 0.75)] ?? 1;
+            $M = $M ?: 1;
+
+            $score = function (array $s) use ($C, $M) {
+                $v = $s['interactionCount'];
+                return ($v / ($v + $M)) * $s['aggregateRating'] + ($M / ($v + $M)) * $C;
+            };
+
+            foreach ($rated as &$s) {
+                $s['_score'] = $score($s);
+            }
+            unset($s);
+
+            $collator = class_exists(\Collator::class) ? new \Collator('en_US') : null;
+
+            usort($rated, function ($a, $b) use ($collator) {
+                return ($b['_score'] <=> $a['_score'])
+                    ?: ($b['aggregateRating'] <=> $a['aggregateRating'])
+                    ?: ($b['interactionCount'] <=> $a['interactionCount'])
+                    ?: ($collator
+                        ? $collator->compare((string) $a['name'], (string) $b['name'])
+                        : strcasecmp((string) $a['name'], (string) $b['name']));
+            });
+
+            $map = [];
+            foreach ($rated as $i => $s) {
+                $map[$s['id']] = $i + 1;
+            }
+            return $map;
+        });
+    }
+
+    /**
      * Rekomendasi mirip: skor gabungan genre (Jaccard), keywords (cosine), cast (maks 3 orang).
      * Series yang tidak berbagi apa pun dengan series ini tidak ikut.
      */
@@ -315,10 +369,11 @@ class ShowController extends Controller
         // dikirim sebagai array (nama bisa mengandung koma)
         // actor & author dipakai sebagai link ke /person
         $multiArray  = ['actor', 'author', 'spokenLanguage', 'platform', 'productionCompany'];
+        // 'rank' sengaja TIDAK ada di sini: rank dihitung sendiri lewat ranks()
         $single = [
             'name', 'description', 'image', 'award', 'contentRating', 'slogan',
             'startDate', 'endDate', 'numberOfSeasons', 'numberOfEpisodes',
-            'status', 'rank', 'tmdbId', 'tvdbId', 'wikidataId', 'imdbId',
+            'status', 'tmdbId', 'tvdbId', 'wikidataId', 'imdbId',
         ];
 
         $show  = ['id' => $id, 'uri' => $imdb];
@@ -359,7 +414,10 @@ class ShowController extends Controller
         $show['bestRating']       = isset($rt['best']) ? (float) $rt['best'] : 10;
         $show['worstRating']      = isset($rt['worst']) ? (float) $rt['worst'] : 1;
 
-        // Similar recommendation ( hanya memnculkan 12 series ) 
+        // Rank hasil hitung sendiri (sama dengan halaman Top Rated); 0 = tidak ada rank
+        $show['rank'] = $this->ranks()[$id] ?? 0;
+
+        // Similar recommendation (hanya memunculkan 12 series)
         $all = $this->loadShows();
         $cur = null;
         foreach ($all as $s) {
@@ -372,7 +430,7 @@ class ShowController extends Controller
         ];
         $similar = $this->similarTo($id, $cur, $all);
 
-        // 'shows' -> untuk carousel similar)
+        // 'shows' -> untuk carousel similar
         return view('detail', ['show' => $show, 'shows' => $similar]);
     }
 }
