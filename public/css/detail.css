@@ -37,8 +37,11 @@ body { background: var(--bg) linear-gradient(180deg, var(--hero-top) 0%, var(--b
 .rankbox {
     display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 24px; border-radius: 12px;
     background: var(--card); border: 1px solid rgba(255, 200, 61, .35);
+    text-decoration: none; cursor: pointer;
+    transition: transform .25s;
 }
-.rankbox:hover, .rankbox:focus, .rankbox:visited { text-decoration: none; }
+.rankbox:hover, .rankbox:focus-visible { transform: translateY(-2px); outline: none; text-decoration: none; }
+.rankbox:focus, .rankbox:visited { text-decoration: none; }
 .rankbox span { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #9a9fb8; }
 .rankbox strong { font: 800 26px var(--font-head); letter-spacing: -.03em; color: var(--gold); line-height: 1.1; }
 
@@ -182,12 +185,22 @@ a.chip:hover, a.chip:focus-visible { transform: translateY(-2px); background: #2
 }
 .rv__toggle:hover, .rv__toggle:focus-visible { color: #fff; outline: none; text-decoration: underline; }
 
-.reviews__more {
-    display: block; margin: 20px auto 0; padding: 9px 22px; border: 1.5px solid var(--lavender); border-radius: 999px;
-    background: transparent; cursor: pointer; font: 600 13px var(--font-nav); color: var(--lavender);
-    transition: background .2s, color .2s;
+.reviews { scroll-margin-top: 90px; }
+
+/* Pagination review */
+.reviews__pager { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.reviews__pager[hidden] { display: none; }
+.rvpg {
+    min-width: 38px; height: 38px; padding: 0 12px; display: inline-grid; place-items: center;
+    border-radius: 10px; background: var(--card); border: 1px solid rgba(255, 255, 255, .08);
+    font: 600 13.5px var(--font-body); color: #fff; cursor: pointer;
+    transition: background .2s, border-color .2s, color .2s;
 }
-.reviews__more:hover, .reviews__more:focus-visible { background: var(--lavender); color: #111; outline: none; }
+.rvpg svg { width: 16px; height: 16px; }
+.rvpg:hover:not(:disabled):not(.is-active), .rvpg:focus-visible { background: #26262e; border-color: rgba(198, 198, 217, .4); outline: none; }
+.rvpg.is-active { background: var(--lavender); border-color: var(--lavender); color: #111; cursor: default; }
+.rvpg:disabled { opacity: .4; cursor: not-allowed; }
+.rvpg--gap { min-width: 0; padding: 0 2px; background: none; border: 0; color: #9a9fb8; cursor: default; }
 .reviews__empty { padding: 26px 0; text-align: center; font-size: 14px; color: var(--muted); }
 .reviews__src { margin-top: 18px; font-size: 12px; color: #7d7d93; }
 

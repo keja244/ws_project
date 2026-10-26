@@ -20,7 +20,7 @@
 @yield('content')
 
 <footer class="footer">
-    <div class="container">TV-Show information is provided by TMDB. Only shows with an IMDb rating of 7.0 or higher are included.</div>
+    <div class="container">TV-Show information is provided by TMDB. Only shows with an IMDb rating of 6.0 or higher are included.</div>
 </footer>
 
 <script>window.ITV_SHOWS = @json($shows ?? []);</script>
