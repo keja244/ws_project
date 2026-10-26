@@ -210,10 +210,3 @@ a.chip:hover, a.chip:focus-visible { transform: translateY(-2px); background: #2
     .rv { padding: 16px; }
     .rv__text { font-size: 14px; }
 }
-
-/* Backdrop banner, tombol trailer, judul asli */
-.detail__backdrop { height: clamp(150px, 22vw, 280px); margin-bottom: 28px; border-radius: 18px; background-color: var(--card); background-size: cover; background-position: center 25%; }
-.detail__btns { flex: none; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
-.trailer-btn { background: #ff2d4d; color: #fff; }
-.trailer-btn:hover, .trailer-btn:focus-visible { background: #ff5470; }
-.detail__alt { margin-top: 6px; font-size: 13px; font-weight: 500; color: #9a9fb8; }

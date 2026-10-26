@@ -20,7 +20,7 @@
 @yield('content')
 
 <footer class="footer">
-    <div class="container">Information courtesy of IMDb (<a href="https://www.imdb.com" target="_blank" rel="noopener noreferrer">imdb.com</a>). Used with permission. This product uses the TMDB API but is not endorsed or certified by TMDB.</div>
+    <div class="container">TV-Show information is provided by TMDB. Only shows with an IMDb rating of 7.0 or higher are included.</div>
 </footer>
 
 <script>window.ITV_SHOWS = @json($shows ?? []);</script>

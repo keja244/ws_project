@@ -1,10 +1,11 @@
+
 (() => {
     'use strict';
 
     const { $, esc, SHOWS, byRating, STAR, renderPager, getPage, setParams } = window.ITV;
 
     const DETAIL_URL = window.ITV_DETAIL_URL || '/detail/';
-    const PER_PAGE = 10;
+    const PER_PAGE = 12;
     const RANKED = [...SHOWS].sort(byRating);
     const sep = '<span class="sep">|</span>';
 
