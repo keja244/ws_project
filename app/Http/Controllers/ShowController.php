@@ -14,7 +14,7 @@ class ShowController extends Controller
 
     // Field yang hanya dikirim ke browser kalau diminta lewat allShows([...])
     // _g / _a = daftar genre & aktor dalam bentuk array (khusus perhitungan similar & halaman person, tidak pernah dikirim)
-    private const OPTIONAL = ['description', 'keywords', 'platform', 'author', 'numberOfEpisodes', 'contentRating', 'status', 'duration', '_g', '_a'];
+    private const OPTIONAL = ['description', 'keywords', 'platform', 'author','productionCompany', 'numberOfEpisodes', 'contentRating', 'status', 'duration', '_g', '_a'];
 
     public function __construct(private SparqlService $sparql) {}
 
@@ -51,7 +51,7 @@ class ShowController extends Controller
      */
     private function loadShows(): array
     {
-        return Cache::remember('all_shows_v10', 3600, function () {
+        return Cache::remember('all_shows_v8', 3600, function () {
             $rows = $this->sparql->query('
                 PREFIX schema: <https://schema.org/>
                 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -142,7 +142,26 @@ class ShowController extends Controller
                 $au[$r['s']] = self::labels($r['authors'] ?? null);
             }
 
-            return array_map(function ($r) use ($kw, $pf, $au) {
+            // production company: satu baris per (series, company).
+            // Label dihitung di PHP dengan self::label() supaya sama persis dengan detail()
+            // (kalau node company tidak punya rdfs:label, fallback dari URI).
+            // CATATAN: kalau halaman company kosong, coba ganti schema:productionCompany
+            // dengan ex:productionCompany (+ PREFIX ex: <http://example.org/tvseries/vocab#>).
+            $pc = [];
+            $pcRows = $this->sparql->query('
+                PREFIX schema: <https://schema.org/>
+                PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                SELECT DISTINCT ?s ?p ?pl
+                WHERE {
+                    ?s a schema:TVSeries ; schema:productionCompany ?p .
+                    OPTIONAL { ?p rdfs:label ?pl }
+                }
+            ');
+            foreach ($pcRows as $r) {
+                $pc[$r['s']][] = !empty($r['pl']) ? $r['pl'] : self::label($r['p']);
+            }
+
+            return array_map(function ($r) use ($kw, $pf, $au, $pc) {
                 $g = self::labels($r['genres'] ?? null);
                 $a = self::labels($r['actors'] ?? null);
                 return [
@@ -166,6 +185,7 @@ class ShowController extends Controller
                     'platform'         => $pf[$r['s']] ?? [],
                     'keywords'         => $kw[$r['s']] ?? [],
                     'author'           => $au[$r['s']] ?? [],
+                    'productionCompany' => array_values(array_unique($pc[$r['s']] ?? [])),
                     '_g'               => $g,
                     '_a'               => $a,
                 ];
@@ -183,6 +203,60 @@ class ShowController extends Controller
     private function allShows(array $with = []): array
     {
         return $this->slim($this->loadShows(), $with);
+    }
+
+    /**
+     * Rank sama persis dengan top-rated.js:
+     * Weighted Rating (Bayesian) -> rating desc -> votes desc -> nama A-Z.
+     * Return: ['tt0903747' => 1, 'tt0944947' => 2, ...]
+     */
+    private function ranks(): array
+    {
+        return Cache::remember('show_ranks_v1', 3600, function () {
+            $rated = array_values(array_filter(
+                $this->loadShows(),
+                fn ($s) => $s['aggregateRating'] > 0
+            ));
+            if (!$rated) return [];
+
+            $n = count($rated);
+
+            // C = rata-rata rating seluruh series
+            $C = array_sum(array_column($rated, 'aggregateRating')) / $n;
+
+            // M = persentil ke-75 dari jumlah vote (minimal 1)
+            $votes = array_column($rated, 'interactionCount');
+            sort($votes);
+            $M = $votes[(int) floor($n * 0.75)] ?? 1;
+            $M = $M ?: 1;
+
+            $score = function (array $s) use ($C, $M) {
+                $v = $s['interactionCount'];
+                return ($v / ($v + $M)) * $s['aggregateRating'] + ($M / ($v + $M)) * $C;
+            };
+
+            foreach ($rated as &$s) {
+                $s['_score'] = $score($s);
+            }
+            unset($s);
+
+            $collator = class_exists(\Collator::class) ? new \Collator('en_US') : null;
+
+            usort($rated, function ($a, $b) use ($collator) {
+                return ($b['_score'] <=> $a['_score'])
+                    ?: ($b['aggregateRating'] <=> $a['aggregateRating'])
+                    ?: ($b['interactionCount'] <=> $a['interactionCount'])
+                    ?: ($collator
+                        ? $collator->compare((string) $a['name'], (string) $b['name'])
+                        : strcasecmp((string) $a['name'], (string) $b['name']));
+            });
+
+            $map = [];
+            foreach ($rated as $i => $s) {
+                $map[$s['id']] = $i + 1;
+            }
+            return $map;
+        });
     }
 
     /**
@@ -296,6 +370,23 @@ class ShowController extends Controller
         ]);
     }
 
+    // /company?c=Sony+Pictures+Television -> hanya series dari company itu yang dikirim ke browser
+    public function company(Request $request)
+    {
+        $name   = trim((string) $request->query('c', ''));
+        $needle = mb_strtolower($name);
+
+        $matches = $needle === '' ? [] : array_values(array_filter(
+            $this->loadShows(),
+            fn ($s) => in_array($needle, array_map('mb_strtolower', $s['productionCompany']), true)
+        ));
+
+        return view('company', [
+            'shows'   => $this->slim($matches),
+            'company' => $name,
+        ]);
+    }
+
     // /person?name=Bryan+Cranston -> series yang dibintangi ATAU dibuat orang itu.
     // 'roles' (actor / author) dikirim per series supaya halaman bisa menyaring per peran.
     public function person(Request $request)
@@ -356,13 +447,13 @@ class ShowController extends Controller
         // dikirim sebagai string "A, B, C" (dipecah di detail.js)
         $multiString = ['genre', 'countryOfOrigin', 'inLanguage'];
         // dikirim sebagai array (nama bisa mengandung koma)
-        // actor & author dipakai sebagai link ke /person
+        // actor & author dipakai sebagai link ke /person, productionCompany ke /company
         $multiArray  = ['actor', 'author', 'spokenLanguage', 'platform', 'productionCompany'];
+        // 'rank' sengaja TIDAK ada di sini: rank dihitung sendiri lewat ranks()
         $single = [
             'name', 'description', 'image', 'award', 'contentRating', 'slogan',
             'startDate', 'endDate', 'numberOfSeasons', 'numberOfEpisodes',
-            'status', 'rank', 'tmdbId', 'tvdbId', 'wikidataId', 'imdbId',
-            'trailer', 'thumbnailUrl', 'alternateName',
+            'status', 'tmdbId', 'tvdbId', 'wikidataId', 'imdbId',
         ];
 
         $show  = ['id' => $id, 'uri' => $imdb];
@@ -403,7 +494,10 @@ class ShowController extends Controller
         $show['bestRating']       = isset($rt['best']) ? (float) $rt['best'] : 10;
         $show['worstRating']      = isset($rt['worst']) ? (float) $rt['worst'] : 1;
 
-        // Similar recommendation ( hanya memnculkan 12 series ) 
+        // Rank hasil hitung sendiri (sama dengan halaman Top Rated); 0 = tidak ada rank
+        $show['rank'] = $this->ranks()[$id] ?? 0;
+
+        // Similar recommendation (hanya memunculkan 12 series)
         $all = $this->loadShows();
         $cur = null;
         foreach ($all as $s) {
@@ -416,7 +510,7 @@ class ShowController extends Controller
         ];
         $similar = $this->similarTo($id, $cur, $all);
 
-        // 'shows' -> untuk carousel similar)
+        // 'shows' -> untuk carousel similar
         return view('detail', ['show' => $show, 'shows' => $similar]);
     }
 }

@@ -14,6 +14,8 @@ Route::get('/platform', [ShowController::class, 'platform']);
 
 Route::get('/keyword', [ShowController::class, 'keyword']);
 
+Route::get('/company', [ShowController::class, 'company']);
+
 Route::get('/person', [ShowController::class, 'person']);
 
 Route::get('/top-rated', [ShowController::class, 'topRated']);

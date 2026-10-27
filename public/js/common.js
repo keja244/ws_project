@@ -77,19 +77,17 @@ window.ITV = (() => {
     };
     const recommended = () => {
         const byId = new Map(SHOWS.map((s) => [s.id, s]));
-        // new Set(...) = buang ID yang tertulis dobel; yang tidak ada di data otomatis dilewati
-        const manual = [...new Set(RECOMMENDED_IDS)].map((id) => byId.get(id)).filter(Boolean);
-        if (manual.length >= REC_LIMIT) return manual.slice(0, REC_LIMIT);
+        const manual = RECOMMENDED_IDS.map((id) => byId.get(id)).filter(Boolean);
+        if (manual.length) return manual.slice(0, REC_LIMIT);
         const d = new Date();
         const rnd = seeded(d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate());
-        let pool = SHOWS.filter((s) => s.rating >= 8 && s.image && !manual.includes(s));
-        if (!pool.length) pool = SHOWS.filter((s) => !manual.includes(s));
+        let pool = SHOWS.filter((s) => s.rating >= 8 && s.image);
+        if (!pool.length) pool = [...SHOWS];
         for (let i = pool.length - 1; i > 0; i--) {
             const j = Math.floor(rnd() * (i + 1));
             [pool[i], pool[j]] = [pool[j], pool[i]];
         }
-        // sisa slot diisi acak (berubah tiap hari) supaya selalu terisi 10
-        return [...manual, ...pool].slice(0, REC_LIMIT);
+        return pool.slice(0, REC_LIMIT);
     };
 
     const CATEGORIES = [

@@ -69,9 +69,7 @@
         list.innerHTML = total
             ? data.slice(from, from + PER_PAGE).map(cardHTML).join('')
             : `<p class="results__empty">No series found for “${esc(name)}”.</p>`;
-        status.textContent = total
-            ? `${total.toLocaleString()} series${summary() ? ` · ${summary()}` : ''} · ${(from + 1).toLocaleString()}–${Math.min(from + PER_PAGE, total).toLocaleString()} shown`
-            : '';
+        status.textContent = total ? `${total.toLocaleString()} series` : '';
         renderPager(pager, {
             page, pages,
             onChange: (p) => { page = p; setParams({ page: p > 1 ? p : null }, 'push'); render(true); },
