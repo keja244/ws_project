@@ -18,7 +18,7 @@
     <section class="container">
         <div class="genre-grid" id="genreGrid"></div>
         <div class="genre-more" id="genreMoreWrap">
-            <nav class="pager" id="genreTilePager" aria-label="Genre pagination" hidden></nav>
+            <nav class="rvpager" id="genreTilePager" aria-label="Genre pagination" hidden></nav>
             <button type="button" class="more-btn" id="genreMore" aria-expanded="false">Show all</button>
         </div>
     </section>
@@ -53,7 +53,7 @@
             </div>
 
             <div class="results results--7" id="genreShows"></div>
-            <nav class="pager" id="pager" aria-label="Pagination" hidden></nav>
+            <nav class="rvpager" id="pager" aria-label="Pagination" hidden></nav>
         </div>
     </section>
 </main>

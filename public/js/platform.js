@@ -2,7 +2,42 @@
    Struktur sama dengan genre.js. */
 (() => {
     'use strict';
-    const { $, esc, SHOWS, USING_PLACEHOLDER, byRating, cardHTML, renderPager, getPage, setParams } = window.ITV;
+    const { $, esc, SHOWS, USING_PLACEHOLDER, byRating, cardHTML, getPage, setParams } = window.ITV;
+
+    /* Pagination bergaya review (sama dengan pager Reviews di halaman detail) */
+    const ARROW_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
+    const ARROW_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+
+    // 1 2 3 ... 9 10 (dengan titik-titik kalau halamannya banyak)
+    const pageItems = (cur, total) => {
+        if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+        const set = [...new Set([1, total, cur - 1, cur, cur + 1])]
+            .filter((p) => p >= 1 && p <= total)
+            .sort((a, b) => a - b);
+        const out = [];
+        let last = 0;
+        set.forEach((p) => { if (p - last > 1) out.push('…'); out.push(p); last = p; });
+        return out;
+    };
+
+    // dipakai untuk pager tile & pager hasil series
+    const renderPager = (el, { page, pages, onChange }) => {
+        el.hidden = pages <= 1;
+        if (pages <= 1) { el.innerHTML = ''; el.onclick = null; return; }
+        el.innerHTML =
+            `<button type="button" class="rvpg" data-page="${page - 1}" aria-label="Previous page"${page === 1 ? ' disabled' : ''}>${ARROW_L}</button>` +
+            pageItems(page, pages).map((p) => p === '…'
+                ? '<span class="rvpg rvpg--gap">…</span>'
+                : `<button type="button" class="rvpg${p === page ? ' is-active' : ''}" data-page="${p}"${p === page ? ' aria-current="page"' : ''}>${p}</button>`).join('') +
+            `<button type="button" class="rvpg" data-page="${page + 1}" aria-label="Next page"${page === pages ? ' disabled' : ''}>${ARROW_R}</button>`;
+        el.onclick = (e) => {
+            const b = e.target.closest('.rvpg[data-page]');
+            if (!b || b.disabled) return;
+            const p = parseInt(b.dataset.page, 10);
+            if (!p || p === page) return;
+            onChange(p);
+        };
+    };
 
     const PER_PAGE = 21;
     const TILES_PER_PAGE = 12;
@@ -51,6 +86,12 @@
     let current = null;
     let tilePage = 1, showAll = false;
 
+    // pager tile: style sama dengan pagination review di halaman detail 
+    const renderTilePager = () => renderPager(tilesPager, {
+        page: tilePage, pages: TILE_PAGES,
+        onChange: (p) => { tilePage = p; renderTiles(true); },
+    });
+
     const markSelected = () => grid.querySelectorAll('.genre-tile')
         .forEach((t) => t.classList.toggle('is-selected', t.dataset.platform === current));
 
@@ -74,11 +115,7 @@
             tilesPager.hidden = true;
             tilesPager.innerHTML = '';
         } else {
-            tilesPager.hidden = TILE_PAGES <= 1;
-            renderPager(tilesPager, {
-                page: tilePage, pages: TILE_PAGES,
-                onChange: (p) => { tilePage = p; renderTiles(true); },
-            });
+            renderTilePager();
         }
         if (scroll) grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };

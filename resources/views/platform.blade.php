@@ -19,7 +19,7 @@
     <section class="container">
         <div class="genre-grid" id="platformGrid"></div>
         <div class="genre-more" id="platformMoreWrap">
-            <nav class="pager" id="platformTilesPager" aria-label="Platform pages" hidden></nav>
+            <nav class="rvpager" id="platformTilesPager" aria-label="Platform pages" hidden></nav>
             <button type="button" class="more-btn" id="platformMore" aria-expanded="false">Show all</button>
         </div>
     </section>
@@ -54,7 +54,7 @@
             </div>
 
             <div class="results results--7" id="platformShows"></div>
-            <nav class="pager" id="pager" aria-label="Pagination" hidden></nav>
+            <nav class="rvpager" id="pager" aria-label="Pagination" hidden></nav>
         </div>
     </section>
 </main>
