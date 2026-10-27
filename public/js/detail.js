@@ -49,6 +49,7 @@
     const KEYWORD_URL = window.ITV_KEYWORD_URL || '/keyword';
     const PERSON_URL = window.ITV_PERSON_URL || '/person';
     const TOP_RATED_URL = window.ITV_TOP_RATED_URL || '/top-rated';
+    const COMPANY_URL = window.ITV_COMPANY_URL || '/company';
 
     // nama orang (cast / creator) -> chip yang membuka /person?name=...
     const personChips = (names) => `<div class="chips chips--sm">${names.map((n) =>
@@ -199,7 +200,9 @@
                     ${r.description ? `<section><h2>Overview</h2><p>${esc(r.description)}</p></section>` : ''}
                     ${creators.length ? `<section><h2>Created by</h2>${personChips(creators)}</section>` : ''}
                     ${cast.length ? `<section><h2>Main Cast</h2>${personChips(cast)}</section>` : ''}
-                    ${companies.length ? `<section><h2>Production Companies</h2><p>${companies.map(esc).join(sep)}</p></section>` : ''}
+                    ${companies.length ? `<section><h2>Production Companies</h2>
+                        <div class="chips chips--sm">${companies.map((c) => `<a class="chip chip--tag" href="${COMPANY_URL}?c=${encodeURIComponent(c)}">${esc(c)}</a>`).join('')}</div>
+                    </section>` : ''}
                     ${keywords.length ? `<section><h2>Keywords</h2>
                         <div class="chips chips--sm">${keywords.map((k) => `<a class="chip chip--tag" href="${KEYWORD_URL}?k=${encodeURIComponent(k)}">${esc(k)}</a>`).join('')}</div>
                     </section>` : ''}

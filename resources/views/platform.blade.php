@@ -18,7 +18,10 @@
 
     <section class="container">
         <div class="genre-grid" id="platformGrid"></div>
-        <nav class="pager" id="platformTilesPager" aria-label="Platform pages" hidden></nav>
+        <div class="genre-more" id="platformMoreWrap">
+            <nav class="pager" id="platformTilesPager" aria-label="Platform pages" hidden></nav>
+            <button type="button" class="more-btn" id="platformMore" aria-expanded="false">Show all</button>
+        </div>
     </section>
 
     <section class="genre-results" id="platformResults" hidden>

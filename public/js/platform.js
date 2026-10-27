@@ -5,7 +5,7 @@
     const { $, esc, SHOWS, USING_PLACEHOLDER, byRating, cardHTML, renderPager, getPage, setParams } = window.ITV;
 
     const PER_PAGE = 21;
-    const TILES_PER_PAGE = 12;                              
+    const TILES_PER_PAGE = 12;
     const SORTERS = {
         rating: byRating,
         votes: (a, b) => b.votes - a.votes,
@@ -30,7 +30,7 @@
         .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 
     const tileHTML = (g) => `
-        <a class="genre-tile" href="?platform=${encodeURIComponent(g.name)}" data-platform="${esc(g.name)}">
+        <a class="genre-tile${g.name === current ? ' is-selected' : ''}" href="?platform=${encodeURIComponent(g.name)}" data-platform="${esc(g.name)}">
             ${g.cover ? `<img src="${esc(g.cover)}" alt="" loading="lazy" draggable="false" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
             <span class="genre-tile__label">
                 <span class="genre-tile__name">${esc(g.name)}</span>
@@ -38,16 +38,18 @@
             </span>
         </a>`;
 
-    const grid = $('#platformGrid'), tilesPager = $('#platformTilesPager');
+    const grid = $('#platformGrid'), moreWrap = $('#platformMoreWrap'), moreBtn = $('#platformMore'), tilesPager = $('#platformTilesPager');
 
     if (!platformList.length) {
         grid.innerHTML = '<p class="results__empty">No platform data available yet.</p>';
+        moreWrap.hidden = true;
         return;
     }
 
-    /*  Pagination untuk daftar tile platform */
+    /*  Pagination + Show all / Show less untuk daftar tile platform */
     const TILE_PAGES = Math.ceil(platformList.length / TILES_PER_PAGE);
-    let tilePage = 1;
+    let current = null;
+    let tilePage = 1, showAll = false;
 
     const markSelected = () => grid.querySelectorAll('.genre-tile')
         .forEach((t) => t.classList.toggle('is-selected', t.dataset.platform === current));
@@ -55,24 +57,51 @@
     const renderTiles = (scroll) => {
         tilePage = Math.min(Math.max(tilePage, 1), TILE_PAGES);
         const from = (tilePage - 1) * TILES_PER_PAGE;
-        grid.innerHTML = platformList.slice(from, from + TILES_PER_PAGE).map(tileHTML).join('');
-        markSelected();
-        renderPager(tilesPager, {
-            page: tilePage, pages: TILE_PAGES,
-            onChange: (p) => { tilePage = p; renderTiles(true); },
-        });
+        const items = showAll ? platformList : platformList.slice(from, from + TILES_PER_PAGE);
+        grid.innerHTML = items.map(tileHTML).join('');
+
+        // platform sedikit -> tidak perlu pagination maupun tombol
+        if (platformList.length <= TILES_PER_PAGE) {
+            moreWrap.hidden = true;
+            tilesPager.hidden = true;
+            return;
+        }
+
+        moreBtn.textContent = showAll ? 'Show less' : 'Show all';
+        moreBtn.setAttribute('aria-expanded', String(showAll));
+
+        if (showAll) {
+            tilesPager.hidden = true;
+            tilesPager.innerHTML = '';
+        } else {
+            tilesPager.hidden = TILE_PAGES <= 1;
+            renderPager(tilesPager, {
+                page: tilePage, pages: TILE_PAGES,
+                onChange: (p) => { tilePage = p; renderTiles(true); },
+            });
+        }
         if (scroll) grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
+    moreBtn.addEventListener('click', () => {
+        showAll = !showAll;
+        if (!showAll) {
+            // kembali ke mode halaman: tampilkan halaman yang memuat platform terpilih (kalau ada)
+            const i = current ? platformList.findIndex((g) => g.name === current) : -1;
+            tilePage = i >= 0 ? Math.floor(i / TILES_PER_PAGE) + 1 : 1;
+        }
+        renderTiles(!showAll);
+    });
+
     // pindah ke halaman tile yang memuat platform ini (dipakai saat dibuka dari URL / chip di detail)
     const revealPlatform = (name) => {
+        if (showAll) return;
         const i = platformList.findIndex((g) => g.name === name);
         if (i < 0) return;
         const p = Math.floor(i / TILES_PER_PAGE) + 1;
         if (p !== tilePage) { tilePage = p; renderTiles(false); }
     };
 
-    let current = null;
     renderTiles(false);
 
     /*  Hasil per platform + search + pagination  */

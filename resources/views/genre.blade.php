@@ -18,7 +18,8 @@
     <section class="container">
         <div class="genre-grid" id="genreGrid"></div>
         <div class="genre-more" id="genreMoreWrap">
-            <button type="button" class="more-btn" id="genreMore" aria-expanded="false">See more</button>
+            <nav class="pager" id="genreTilePager" aria-label="Genre pagination" hidden></nav>
+            <button type="button" class="more-btn" id="genreMore" aria-expanded="false">Show all</button>
         </div>
     </section>
 

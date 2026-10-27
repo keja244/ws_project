@@ -2,14 +2,18 @@
     'use strict';
     const { $, esc, SHOWS, byRating, cardHTML, renderPager, getPage, setParams } = window.ITV;
 
-    const PER_PAGE = 21;                                   
-    const TILES_SHOWN = 12;                                 
+    const PER_PAGE = 21;                                    // hasil series per halaman
+    const TILES_PER_PAGE = 12;                              // tile genre per halaman
     const SORTERS = {
         rating: byRating,
         votes: (a, b) => b.votes - a.votes,
         newest: (a, b) => b.start - a.start || byRating(a, b),
         seasons: (a, b) => b.seasons - a.seasons || byRating(a, b),
     };
+
+    /* State */
+    let current = null, sorted = [], page = 1;              // genre terpilih + hasil series
+    let tilePage = 1, showAll = false;                      // daftar tile genre
 
     /* Kelompokkan per genre */
     const GENRES = new Map();
@@ -25,8 +29,8 @@
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
-    const tileHTML = (g, i) => `
-        <a class="genre-tile${i >= TILES_SHOWN ? ' is-extra' : ''}" href="?genre=${encodeURIComponent(g.name)}" data-genre="${esc(g.name)}">
+    const tileHTML = (g) => `
+        <a class="genre-tile${g.name === current ? ' is-selected' : ''}" href="?genre=${encodeURIComponent(g.name)}" data-genre="${esc(g.name)}">
             ${g.cover ? `<img src="${esc(g.cover)}" alt="" loading="lazy" draggable="false" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
             <span class="genre-tile__label">
                 <span class="genre-tile__name">${esc(g.name)}</span>
@@ -34,30 +38,64 @@
             </span>
         </a>`;
 
-    const grid = $('#genreGrid'), moreWrap = $('#genreMoreWrap'), moreBtn = $('#genreMore');
-    grid.innerHTML = genreList.map(tileHTML).join('');
+    const grid = $('#genreGrid'), moreWrap = $('#genreMoreWrap'), moreBtn = $('#genreMore'), tilePager = $('#genreTilePager');
+    const tilePages = Math.max(1, Math.ceil(genreList.length / TILES_PER_PAGE));
 
-    /*  See more / Show less untuk daftar genre  */
-    if (genreList.length > TILES_SHOWN) {
-        grid.classList.add('is-collapsed');
-        moreBtn.addEventListener('click', () => {
-            const collapsed = grid.classList.toggle('is-collapsed');
-            moreBtn.textContent = collapsed ? 'See more' : 'Show less';
-            moreBtn.setAttribute('aria-expanded', String(!collapsed));
-        });
-    } else {
-        moreWrap.hidden = true;
-    }
-    const revealGenre = (name) => {                       
-        const i = genreList.findIndex((g) => g.name === name);
-        if (i >= TILES_SHOWN && grid.classList.contains('is-collapsed')) moreBtn.click();
+    /*  Daftar genre: pagination + Show all / Show less  */
+    const renderTiles = () => {
+        tilePage = Math.min(Math.max(tilePage, 1), tilePages);
+        const from = (tilePage - 1) * TILES_PER_PAGE;
+        const items = showAll ? genreList : genreList.slice(from, from + TILES_PER_PAGE);
+        grid.innerHTML = items.map(tileHTML).join('');
+
+        // genre sedikit -> tidak perlu pagination maupun tombol
+        if (genreList.length <= TILES_PER_PAGE) {
+            moreWrap.hidden = true;
+            return;
+        }
+
+        moreBtn.textContent = showAll ? 'Show less' : 'Show all';
+        moreBtn.setAttribute('aria-expanded', String(showAll));
+
+        if (showAll) {
+            tilePager.hidden = true;
+            tilePager.innerHTML = '';
+        } else {
+            tilePager.hidden = tilePages <= 1;
+            renderPager(tilePager, {
+                page: tilePage,
+                pages: tilePages,
+                onChange: (p) => { tilePage = p; renderTiles(); },
+            });
+        }
     };
+
+    moreBtn.addEventListener('click', () => {
+        showAll = !showAll;
+        if (!showAll) {
+            // kembali ke mode halaman: tampilkan halaman yang memuat genre terpilih (kalau ada)
+            const i = current ? genreList.findIndex((g) => g.name === current) : -1;
+            tilePage = i >= 0 ? Math.floor(i / TILES_PER_PAGE) + 1 : 1;
+        }
+        renderTiles();
+        if (!showAll) grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    // pastikan tile genre terpilih terlihat (pindah ke halaman tile yang memuatnya)
+    const revealGenre = (name) => {
+        if (showAll) return;
+        const i = genreList.findIndex((g) => g.name === name);
+        if (i < 0) return;
+        const p = Math.floor(i / TILES_PER_PAGE) + 1;
+        if (p !== tilePage) { tilePage = p; renderTiles(); }
+    };
+
+    renderTiles();
 
     /*  Hasil per genre + search + pagination  */
     const section = $('#genreResults'), title = $('#resultsTitle'), status = $('#resultsStatus');
     const list = $('#genreShows'), sortSel = $('#sortSelect'), pager = $('#pager');
     const qForm = $('#genreSearch'), qInput = $('#genreQ'), qClear = $('#genreClear');
-    let current = null, sorted = [], page = 1;
 
     const apply = () => {
         const q = qInput.value.trim().toLowerCase();
@@ -100,8 +138,8 @@
         title.textContent = name;
         section.hidden = false;
         document.title = `${name} — ITV`;
-        grid.querySelectorAll('.genre-tile').forEach((t) => t.classList.toggle('is-selected', t.dataset.genre === name));
         revealGenre(name);
+        grid.querySelectorAll('.genre-tile').forEach((t) => t.classList.toggle('is-selected', t.dataset.genre === name));
         apply();
         render(scroll);
     };
@@ -121,7 +159,7 @@
         showGenre(current, 1, false);
     });
 
-    // search di dalam genre 
+    // search di dalam genre
     let t;
     const runSearch = () => {
         if (!current) return;
