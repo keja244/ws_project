@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ChatbotService;
 use App\Services\SparqlService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -13,7 +14,7 @@ class ShowController extends Controller
 
     // Field yang hanya dikirim ke browser kalau diminta lewat allShows([...])
     // _g / _a = daftar genre & aktor dalam bentuk array (khusus perhitungan similar & halaman person, tidak pernah dikirim)
-    private const OPTIONAL = ['description', 'keywords', 'platform', 'author', '_g', '_a'];
+    private const OPTIONAL = ['description', 'keywords', 'platform', 'author', 'numberOfEpisodes', 'contentRating', 'status', 'duration', '_g', '_a'];
 
     public function __construct(private SparqlService $sparql) {}
 
@@ -50,20 +51,36 @@ class ShowController extends Controller
      */
     private function loadShows(): array
     {
-        return Cache::remember('all_shows_v7', 3600, function () {
+        return Cache::remember('all_shows_v10', 3600, function () {
             $rows = $this->sparql->query('
                 PREFIX schema: <https://schema.org/>
                 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
                 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-                SELECT ?s ?name ?startDate ?endDate ?numberOfSeasons ?award ?image ?description ?rating ?votes
+                SELECT ?s (SAMPLE(DISTINCT ?name) AS ?nameValue)
+                    (SAMPLE(DISTINCT ?startDate) AS ?startDateValue)
+                    (SAMPLE(DISTINCT ?endDate) AS ?endDateValue)
+                    (SAMPLE(DISTINCT ?numberOfSeasons) AS ?numberOfSeasonsValue)
+                    (SAMPLE(DISTINCT ?numberOfEpisodes) AS ?numberOfEpisodesValue)
+                    (SAMPLE(DISTINCT ?contentRating) AS ?contentRatingValue)
+                    (SAMPLE(DISTINCT ?status) AS ?statusValue)
+                    (SAMPLE(DISTINCT ?duration) AS ?durationValue)
+                    (GROUP_CONCAT(DISTINCT STR(?award); separator="|") AS ?awards)
+                    (SAMPLE(DISTINCT ?image) AS ?imageValue)
+                    (SAMPLE(DISTINCT ?description) AS ?descriptionValue)
+                    (SAMPLE(DISTINCT ?rating) AS ?ratingValue)
+                    (SAMPLE(DISTINCT ?votes) AS ?votesValue)
                     (GROUP_CONCAT(DISTINCT COALESCE(?gl, STR(?g)); separator="|") AS ?genres)
                     (GROUP_CONCAT(DISTINCT COALESCE(?al, STR(?a)); separator="|") AS ?actors)
-                    (GROUP_CONCAT(DISTINCT COALESCE(?cl, STR(?c)); separator="|") AS ?countries)
+                    (GROUP_CONCAT(DISTINCT COALESCE(?cl, REPLACE(REPLACE(STR(?c), "^.*[/#]", ""), "_", " ")); separator="|") AS ?countries)
                 WHERE {
                     ?s a schema:TVSeries ; schema:name ?name .
                     OPTIONAL { ?s schema:startDate ?startDate . }
                     OPTIONAL { ?s schema:endDate ?endDate . }
                     OPTIONAL { ?s schema:numberOfSeasons ?numberOfSeasons . }
+                    OPTIONAL { ?s schema:numberOfEpisodes ?numberOfEpisodes . }
+                    OPTIONAL { ?s schema:contentRating ?contentRating . }
+                    OPTIONAL { ?s schema:status ?status . }
+                    OPTIONAL { ?s schema:duration ?duration . }
                     OPTIONAL { ?s schema:award ?award . }
                     OPTIONAL { ?s schema:image ?image . }
                     OPTIONAL { ?s schema:description ?description . }
@@ -76,8 +93,8 @@ class ShowController extends Controller
                         OPTIONAL { ?r schema:ratingCount ?votes }
                     }
                 }
-                GROUP BY ?s ?name ?startDate ?endDate ?numberOfSeasons ?award ?image ?description ?rating ?votes
-                ORDER BY DESC(xsd:decimal(?rating))
+                GROUP BY ?s
+                ORDER BY DESC(xsd:decimal(?ratingValue))
             ');
 
             // keywords: satu baris per series
@@ -130,16 +147,20 @@ class ShowController extends Controller
                 $a = self::labels($r['actors'] ?? null);
                 return [
                     'id'               => basename(rtrim($r['s'], '/')),
-                    'name'             => $r['name'],
-                    'aggregateRating'  => isset($r['rating']) ? (float) $r['rating'] : 0,
-                    'interactionCount' => isset($r['votes']) ? (int) $r['votes'] : 0,
-                    'startDate'        => $r['startDate'] ?? null,
-                    'endDate'          => $r['endDate'] ?? null,
-                    'numberOfSeasons'  => $r['numberOfSeasons'] ?? null,
-                    'award'            => $r['award'] ?? '',
+                    'name'             => $r['nameValue'],
+                    'aggregateRating'  => isset($r['ratingValue']) ? (float) $r['ratingValue'] : 0,
+                    'interactionCount' => isset($r['votesValue']) ? (int) $r['votesValue'] : 0,
+                    'startDate'        => $r['startDateValue'] ?? null,
+                    'endDate'          => $r['endDateValue'] ?? null,
+                    'numberOfSeasons'  => $r['numberOfSeasonsValue'] ?? null,
+                    'numberOfEpisodes' => $r['numberOfEpisodesValue'] ?? null,
+                    'contentRating'    => $r['contentRatingValue'] ?? '',
+                    'status'           => $r['statusValue'] ?? '',
+                    'duration'         => self::minutes($r['durationValue'] ?? null),
+                    'award'            => implode(', ', self::labels($r['awards'] ?? null)),
                     'countryOfOrigin'  => implode(', ', self::labels($r['countries'] ?? null)),
-                    'image'            => $r['image'] ?? '',
-                    'description'      => $r['description'] ?? '',
+                    'image'            => $r['imageValue'] ?? '',
+                    'description'      => $r['descriptionValue'] ?? '',
                     'genre'            => implode(', ', $g),
                     'actor'            => implode(', ', $a),
                     'platform'         => $pf[$r['s']] ?? [],
@@ -214,6 +235,28 @@ class ShowController extends Controller
     {
         // 'platform' ikut dikirim supaya filter Platform di halaman search bisa bekerja
         return view('search', ['shows' => $this->allShows(['platform'])]);
+    }
+
+    public function chat(Request $request, ChatbotService $chatbot)
+    {
+        $validated = $request->validate([
+            'message' => ['required', 'string', 'max:500'],
+        ]);
+
+        $stateKey = 'series_tv_chat_state';
+        $response = $chatbot->respond(
+            $validated['message'],
+            $this->loadShows(),
+            (array) $request->session()->get($stateKey, [])
+        );
+        if (array_key_exists('state', $response)) {
+            $request->session()->put($stateKey, $response['state']);
+            unset($response['state']);
+        } else {
+            $request->session()->forget($stateKey);
+        }
+
+        return response()->json($response);
     }
 
     public function genre()
