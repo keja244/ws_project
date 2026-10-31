@@ -13,6 +13,7 @@
 .chatbot__bubble--bot{padding:11px 13px;background:#fff;border:1px solid #ededf1;border-radius:4px 15px 15px}
 .chatbot__bubble--user{align-self:flex-end;padding:10px 13px;background:#e8445a;color:#fff;border-radius:15px 4px 15px 15px}
 .chatbot__bubble--error{color:#9c2738}
+.chatbot__note{margin-top:8px;padding:6px 9px;border-left:3px solid #e8445a;background:#fff5f6;font-size:11px;color:#9c2738;border-radius:4px}
 .chatbot__cards{display:grid;gap:8px}
 .chatbot__card{display:flex;align-items:center;gap:10px;padding:8px;border:1px solid #eee;border-radius:12px;background:#fff;color:inherit;text-decoration:none}
 .chatbot__card img,.chatbot__poster-fallback{width:42px;height:58px;flex:none;border-radius:6px;object-fit:cover;background:#25252d;color:#fff}
@@ -24,5 +25,11 @@
 .chatbot__form input{min-width:0;flex:1;padding:11px 12px;border:1px solid #e1e1e6;border-radius:10px;font:inherit;font-size:13px}
 .chatbot__form button{padding:0 15px;border:0;border-radius:10px;background:#e8445a;color:#fff;font:700 12px/1.2 "Plus Jakarta Sans",sans-serif;cursor:pointer}
 .chatbot__form button:disabled{opacity:.55;cursor:wait}
+.chatbot__quick-replies,.chatbot__feedback{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.chatbot__quick-reply,.chatbot__feedback button,.chatbot__more{padding:6px 9px;border:1px solid #e4e4e9;border-radius:999px;background:#fff;color:#393943;font:500 11px/1.3 "Plus Jakarta Sans",sans-serif;cursor:pointer}
+.chatbot__quick-reply:hover,.chatbot__feedback button:hover,.chatbot__more:hover{border-color:#e8445a;color:#b72f44}
+.chatbot__feedback{align-items:center;color:#70707a;font-size:11px}
+.chatbot__feedback button:disabled{opacity:.55;cursor:wait}
+.chatbot__more{width:100%;margin-top:8px;border-color:#f1c0c6;color:#b72f44}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media(max-width:600px){.chatbot{right:14px;bottom:14px}.chatbot__panel{bottom:58px;height:min(640px,calc(100vh - 92px))}}

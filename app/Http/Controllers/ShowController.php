@@ -6,6 +6,8 @@ use App\Services\ChatbotService;
 use App\Services\SparqlService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class ShowController extends Controller
 {
@@ -315,22 +317,61 @@ class ShowController extends Controller
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:500'],
+            'conversationId' => ['nullable', 'uuid'],
         ]);
 
-        $stateKey = 'series_tv_chat_state';
+        $conversationId = $validated['conversationId'] ?? 'legacy';
+        $stateKey = 'series_tv_chat_state_'.hash('sha256', strtolower($conversationId));
+        $activityKey = $stateKey.'_last_activity';
+        $lastActivity = $request->session()->get($activityKey);
+        if (! is_numeric($lastActivity) || now()->timestamp - (int) $lastActivity >= 1800) {
+            $request->session()->forget([$stateKey, $activityKey]);
+        }
         $response = $chatbot->respond(
             $validated['message'],
             $this->loadShows(),
             (array) $request->session()->get($stateKey, [])
         );
+        $request->session()->put($activityKey, now()->timestamp);
         if (array_key_exists('state', $response)) {
             $request->session()->put($stateKey, $response['state']);
             unset($response['state']);
-        } else {
-            $request->session()->forget($stateKey);
+        }
+
+        $response['responseId'] = (string) Str::uuid();
+        if (! empty($response['failedQuery'])) {
+            $query = preg_replace('/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i', '[email]', $validated['message']) ?? $validated['message'];
+            $query = preg_replace('/(?<!\d)\+?\d[\d\s().-]{7,}\d(?!\d)/u', '[number]', $query) ?? $query;
+            Log::info('chatbot.failed_query', [
+                'session' => hash_hmac('sha256', $request->session()->getId(), (string) config('app.key')),
+                'query' => mb_substr($query, 0, 500),
+            ]);
+            unset($response['failedQuery']);
         }
 
         return response()->json($response);
+    }
+
+    public function chatFeedback(Request $request)
+    {
+        $validated = $request->validate([
+            'responseId' => ['required', 'uuid'],
+            'helpful' => ['required', 'boolean'],
+            'reason' => ['nullable', 'in:irrelevant,metadata,misunderstood'],
+        ]);
+        $helpful = filter_var($validated['helpful'], FILTER_VALIDATE_BOOLEAN);
+        if (! $helpful && empty($validated['reason'])) {
+            return response()->json(['message' => 'Pilih alasan singkat untuk feedback ini.'], 422);
+        }
+
+        Log::info('chatbot.feedback', [
+            'session' => hash_hmac('sha256', $request->session()->getId(), (string) config('app.key')),
+            'response_id' => $validated['responseId'],
+            'helpful' => $helpful,
+            'reason' => $helpful ? null : $validated['reason'],
+        ]);
+
+        return response()->json(['message' => 'Terima kasih atas feedback-mu.']);
     }
 
     public function genre()
