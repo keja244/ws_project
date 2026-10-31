@@ -26,4 +26,6 @@ Route::get('/detail/{id}', [ShowController::class, 'detail']);
 
 Route::get('/api/reviews/{tmdbId}', [ReviewController::class, 'show'])->whereNumber('tmdbId');
 
-Route::post('/api/chat', [ShowController::class, 'chat'])->middleware('throttle:30,1');
+Route::post('/api/chat', [ShowController::class, 'chat'])->middleware('throttle:12,1');
+
+Route::post('/api/chat/feedback', [ShowController::class, 'chatFeedback'])->middleware('throttle:30,1');
