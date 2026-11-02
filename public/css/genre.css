@@ -1,4 +1,3 @@
-
 .genre-grid {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px 18px;
     padding: 26px 0 8px;
@@ -26,15 +25,32 @@
 .genre-tile__name { font-size: clamp(16px, 1.6vw, 22px); font-weight: 800; letter-spacing: -.01em; }
 .genre-tile__count { font-family: var(--font-nav); font-size: 11.5px; font-weight: 600; color: #fff; opacity: .8; }
 
-.genre-grid.is-collapsed .genre-tile.is-extra { display: none; }
-
-.genre-more { display: flex; justify-content: center; padding: 14px 0 0; }
+/* Pagination tile genre + tombol Show all / Show less */
+.genre-more { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 22px 0 0; }
+.genre-more .rvpager { margin-top: 0; }
+/* Tombol Show all / Show less: setema dengan tombol pagination review */
 .more-btn {
-    padding: 8px 26px; border: 1.5px solid var(--lavender); border-radius: 999px; background: transparent; cursor: pointer;
-    font-family: var(--font-nav); font-size: 13.5px; font-weight: 600; color: var(--lavender);
-    transition: background .2s, color .2s;
+    min-width: 38px; height: 38px; padding: 0 18px; display: inline-grid; place-items: center;
+    border-radius: 10px; background: var(--card); border: 1px solid rgba(255, 255, 255, .08);
+    font: 600 13.5px var(--font-body, var(--font-nav)); color: #fff; cursor: pointer;
+    transition: background .2s, border-color .2s, color .2s;
 }
-.more-btn:hover, .more-btn:focus-visible { background: var(--lavender); color: #111; outline: none; }
+.more-btn:hover, .more-btn:focus-visible { background: #26262e; border-color: rgba(198, 198, 217, .4); outline: none; }
+
+/* Pagination bergaya review (sama dengan pager Reviews di halaman detail) */
+.rvpager { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.rvpager[hidden] { display: none; }
+.rvpg {
+    min-width: 38px; height: 38px; padding: 0 12px; display: inline-grid; place-items: center;
+    border-radius: 10px; background: var(--card); border: 1px solid rgba(255, 255, 255, .08);
+    font: 600 13.5px var(--font-body, var(--font-nav)); color: #fff; cursor: pointer;
+    transition: background .2s, border-color .2s, color .2s;
+}
+.rvpg svg { width: 16px; height: 16px; }
+.rvpg:hover:not(:disabled):not(.is-active), .rvpg:focus-visible { background: #26262e; border-color: rgba(198, 198, 217, .4); outline: none; }
+.rvpg.is-active { background: var(--lavender); border-color: var(--lavender); color: #111; cursor: default; }
+.rvpg:disabled { opacity: .4; cursor: not-allowed; }
+.rvpg--gap { min-width: 0; padding: 0 2px; background: none; border: 0; color: #9a9fb8; cursor: default; }
 
 /* Hasil per genre */
 .genre-results { padding: 40px 0 0; scroll-margin-top: 72px; }

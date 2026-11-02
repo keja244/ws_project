@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ChatbotService;
 use App\Services\SparqlService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class ShowController extends Controller
 {
@@ -13,7 +16,7 @@ class ShowController extends Controller
 
     // Field yang hanya dikirim ke browser kalau diminta lewat allShows([...])
     // _g / _a = daftar genre & aktor dalam bentuk array (khusus perhitungan similar & halaman person, tidak pernah dikirim)
-    private const OPTIONAL = ['description', 'keywords', 'platform', 'author', '_g', '_a'];
+    private const OPTIONAL = ['description', 'keywords', 'platform', 'author','productionCompany', 'numberOfEpisodes', 'contentRating', 'status', 'duration', '_g', '_a'];
 
     public function __construct(private SparqlService $sparql) {}
 
@@ -50,20 +53,36 @@ class ShowController extends Controller
      */
     private function loadShows(): array
     {
-        return Cache::remember('all_shows_v7', 3600, function () {
+        return Cache::remember('all_shows_v8', 3600, function () {
             $rows = $this->sparql->query('
                 PREFIX schema: <https://schema.org/>
                 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
                 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-                SELECT ?s ?name ?startDate ?endDate ?numberOfSeasons ?award ?image ?description ?rating ?votes
+                SELECT ?s (SAMPLE(DISTINCT ?name) AS ?nameValue)
+                    (SAMPLE(DISTINCT ?startDate) AS ?startDateValue)
+                    (SAMPLE(DISTINCT ?endDate) AS ?endDateValue)
+                    (SAMPLE(DISTINCT ?numberOfSeasons) AS ?numberOfSeasonsValue)
+                    (SAMPLE(DISTINCT ?numberOfEpisodes) AS ?numberOfEpisodesValue)
+                    (SAMPLE(DISTINCT ?contentRating) AS ?contentRatingValue)
+                    (SAMPLE(DISTINCT ?status) AS ?statusValue)
+                    (SAMPLE(DISTINCT ?duration) AS ?durationValue)
+                    (GROUP_CONCAT(DISTINCT STR(?award); separator="|") AS ?awards)
+                    (SAMPLE(DISTINCT ?image) AS ?imageValue)
+                    (SAMPLE(DISTINCT ?description) AS ?descriptionValue)
+                    (SAMPLE(DISTINCT ?rating) AS ?ratingValue)
+                    (SAMPLE(DISTINCT ?votes) AS ?votesValue)
                     (GROUP_CONCAT(DISTINCT COALESCE(?gl, STR(?g)); separator="|") AS ?genres)
                     (GROUP_CONCAT(DISTINCT COALESCE(?al, STR(?a)); separator="|") AS ?actors)
-                    (GROUP_CONCAT(DISTINCT COALESCE(?cl, STR(?c)); separator="|") AS ?countries)
+                    (GROUP_CONCAT(DISTINCT COALESCE(?cl, REPLACE(REPLACE(STR(?c), "^.*[/#]", ""), "_", " ")); separator="|") AS ?countries)
                 WHERE {
                     ?s a schema:TVSeries ; schema:name ?name .
                     OPTIONAL { ?s schema:startDate ?startDate . }
                     OPTIONAL { ?s schema:endDate ?endDate . }
                     OPTIONAL { ?s schema:numberOfSeasons ?numberOfSeasons . }
+                    OPTIONAL { ?s schema:numberOfEpisodes ?numberOfEpisodes . }
+                    OPTIONAL { ?s schema:contentRating ?contentRating . }
+                    OPTIONAL { ?s schema:status ?status . }
+                    OPTIONAL { ?s schema:duration ?duration . }
                     OPTIONAL { ?s schema:award ?award . }
                     OPTIONAL { ?s schema:image ?image . }
                     OPTIONAL { ?s schema:description ?description . }
@@ -76,8 +95,8 @@ class ShowController extends Controller
                         OPTIONAL { ?r schema:ratingCount ?votes }
                     }
                 }
-                GROUP BY ?s ?name ?startDate ?endDate ?numberOfSeasons ?award ?image ?description ?rating ?votes
-                ORDER BY DESC(xsd:decimal(?rating))
+                GROUP BY ?s
+                ORDER BY DESC(xsd:decimal(?ratingValue))
             ');
 
             // keywords: satu baris per series
@@ -125,26 +144,50 @@ class ShowController extends Controller
                 $au[$r['s']] = self::labels($r['authors'] ?? null);
             }
 
-            return array_map(function ($r) use ($kw, $pf, $au) {
+            // production company: satu baris per (series, company).
+            // Label dihitung di PHP dengan self::label() supaya sama persis dengan detail()
+            // (kalau node company tidak punya rdfs:label, fallback dari URI).
+            // CATATAN: kalau halaman company kosong, coba ganti schema:productionCompany
+            // dengan ex:productionCompany (+ PREFIX ex: <http://example.org/tvseries/vocab#>).
+            $pc = [];
+            $pcRows = $this->sparql->query('
+                PREFIX schema: <https://schema.org/>
+                PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                SELECT DISTINCT ?s ?p ?pl
+                WHERE {
+                    ?s a schema:TVSeries ; schema:productionCompany ?p .
+                    OPTIONAL { ?p rdfs:label ?pl }
+                }
+            ');
+            foreach ($pcRows as $r) {
+                $pc[$r['s']][] = !empty($r['pl']) ? $r['pl'] : self::label($r['p']);
+            }
+
+            return array_map(function ($r) use ($kw, $pf, $au, $pc) {
                 $g = self::labels($r['genres'] ?? null);
                 $a = self::labels($r['actors'] ?? null);
                 return [
                     'id'               => basename(rtrim($r['s'], '/')),
-                    'name'             => $r['name'],
-                    'aggregateRating'  => isset($r['rating']) ? (float) $r['rating'] : 0,
-                    'interactionCount' => isset($r['votes']) ? (int) $r['votes'] : 0,
-                    'startDate'        => $r['startDate'] ?? null,
-                    'endDate'          => $r['endDate'] ?? null,
-                    'numberOfSeasons'  => $r['numberOfSeasons'] ?? null,
-                    'award'            => $r['award'] ?? '',
+                    'name'             => $r['nameValue'],
+                    'aggregateRating'  => isset($r['ratingValue']) ? (float) $r['ratingValue'] : 0,
+                    'interactionCount' => isset($r['votesValue']) ? (int) $r['votesValue'] : 0,
+                    'startDate'        => $r['startDateValue'] ?? null,
+                    'endDate'          => $r['endDateValue'] ?? null,
+                    'numberOfSeasons'  => $r['numberOfSeasonsValue'] ?? null,
+                    'numberOfEpisodes' => $r['numberOfEpisodesValue'] ?? null,
+                    'contentRating'    => $r['contentRatingValue'] ?? '',
+                    'status'           => $r['statusValue'] ?? '',
+                    'duration'         => self::minutes($r['durationValue'] ?? null),
+                    'award'            => implode(', ', self::labels($r['awards'] ?? null)),
                     'countryOfOrigin'  => implode(', ', self::labels($r['countries'] ?? null)),
-                    'image'            => $r['image'] ?? '',
-                    'description'      => $r['description'] ?? '',
+                    'image'            => $r['imageValue'] ?? '',
+                    'description'      => $r['descriptionValue'] ?? '',
                     'genre'            => implode(', ', $g),
                     'actor'            => implode(', ', $a),
                     'platform'         => $pf[$r['s']] ?? [],
                     'keywords'         => $kw[$r['s']] ?? [],
                     'author'           => $au[$r['s']] ?? [],
+                    'productionCompany' => array_values(array_unique($pc[$r['s']] ?? [])),
                     '_g'               => $g,
                     '_a'               => $a,
                 ];
@@ -162,6 +205,60 @@ class ShowController extends Controller
     private function allShows(array $with = []): array
     {
         return $this->slim($this->loadShows(), $with);
+    }
+
+    /**
+     * Rank sama persis dengan top-rated.js:
+     * Weighted Rating (Bayesian) -> rating desc -> votes desc -> nama A-Z.
+     * Return: ['tt0903747' => 1, 'tt0944947' => 2, ...]
+     */
+    private function ranks(): array
+    {
+        return Cache::remember('show_ranks_v1', 3600, function () {
+            $rated = array_values(array_filter(
+                $this->loadShows(),
+                fn ($s) => $s['aggregateRating'] > 0
+            ));
+            if (!$rated) return [];
+
+            $n = count($rated);
+
+            // C = rata-rata rating seluruh series
+            $C = array_sum(array_column($rated, 'aggregateRating')) / $n;
+
+            // M = persentil ke-75 dari jumlah vote (minimal 1)
+            $votes = array_column($rated, 'interactionCount');
+            sort($votes);
+            $M = $votes[(int) floor($n * 0.75)] ?? 1;
+            $M = $M ?: 1;
+
+            $score = function (array $s) use ($C, $M) {
+                $v = $s['interactionCount'];
+                return ($v / ($v + $M)) * $s['aggregateRating'] + ($M / ($v + $M)) * $C;
+            };
+
+            foreach ($rated as &$s) {
+                $s['_score'] = $score($s);
+            }
+            unset($s);
+
+            $collator = class_exists(\Collator::class) ? new \Collator('en_US') : null;
+
+            usort($rated, function ($a, $b) use ($collator) {
+                return ($b['_score'] <=> $a['_score'])
+                    ?: ($b['aggregateRating'] <=> $a['aggregateRating'])
+                    ?: ($b['interactionCount'] <=> $a['interactionCount'])
+                    ?: ($collator
+                        ? $collator->compare((string) $a['name'], (string) $b['name'])
+                        : strcasecmp((string) $a['name'], (string) $b['name']));
+            });
+
+            $map = [];
+            foreach ($rated as $i => $s) {
+                $map[$s['id']] = $i + 1;
+            }
+            return $map;
+        });
     }
 
     /**
@@ -216,6 +313,67 @@ class ShowController extends Controller
         return view('search', ['shows' => $this->allShows(['platform'])]);
     }
 
+    public function chat(Request $request, ChatbotService $chatbot)
+    {
+        $validated = $request->validate([
+            'message' => ['required', 'string', 'max:500'],
+            'conversationId' => ['nullable', 'uuid'],
+        ]);
+
+        $conversationId = $validated['conversationId'] ?? 'legacy';
+        $stateKey = 'series_tv_chat_state_'.hash('sha256', strtolower($conversationId));
+        $activityKey = $stateKey.'_last_activity';
+        $lastActivity = $request->session()->get($activityKey);
+        if (! is_numeric($lastActivity) || now()->timestamp - (int) $lastActivity >= 1800) {
+            $request->session()->forget([$stateKey, $activityKey]);
+        }
+        $response = $chatbot->respond(
+            $validated['message'],
+            $this->loadShows(),
+            (array) $request->session()->get($stateKey, [])
+        );
+        $request->session()->put($activityKey, now()->timestamp);
+        if (array_key_exists('state', $response)) {
+            $request->session()->put($stateKey, $response['state']);
+            unset($response['state']);
+        }
+
+        $response['responseId'] = (string) Str::uuid();
+        if (! empty($response['failedQuery'])) {
+            $query = preg_replace('/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i', '[email]', $validated['message']) ?? $validated['message'];
+            $query = preg_replace('/(?<!\d)\+?\d[\d\s().-]{7,}\d(?!\d)/u', '[number]', $query) ?? $query;
+            Log::info('chatbot.failed_query', [
+                'session' => hash_hmac('sha256', $request->session()->getId(), (string) config('app.key')),
+                'query' => mb_substr($query, 0, 500),
+            ]);
+            unset($response['failedQuery']);
+        }
+
+        return response()->json($response);
+    }
+
+    public function chatFeedback(Request $request)
+    {
+        $validated = $request->validate([
+            'responseId' => ['required', 'uuid'],
+            'helpful' => ['required', 'boolean'],
+            'reason' => ['nullable', 'in:irrelevant,metadata,misunderstood'],
+        ]);
+        $helpful = filter_var($validated['helpful'], FILTER_VALIDATE_BOOLEAN);
+        if (! $helpful && empty($validated['reason'])) {
+            return response()->json(['message' => 'Pilih alasan singkat untuk feedback ini.'], 422);
+        }
+
+        Log::info('chatbot.feedback', [
+            'session' => hash_hmac('sha256', $request->session()->getId(), (string) config('app.key')),
+            'response_id' => $validated['responseId'],
+            'helpful' => $helpful,
+            'reason' => $helpful ? null : $validated['reason'],
+        ]);
+
+        return response()->json(['message' => 'Terima kasih atas feedback-mu.']);
+    }
+
     public function genre()
     {
         return view('genre', ['shows' => $this->allShows()]);
@@ -250,6 +408,23 @@ class ShowController extends Controller
         return view('keyword', [
             'shows'   => $this->slim($matches),
             'keyword' => $k,
+        ]);
+    }
+
+    // /company?c=Sony+Pictures+Television -> hanya series dari company itu yang dikirim ke browser
+    public function company(Request $request)
+    {
+        $name   = trim((string) $request->query('c', ''));
+        $needle = mb_strtolower($name);
+
+        $matches = $needle === '' ? [] : array_values(array_filter(
+            $this->loadShows(),
+            fn ($s) => in_array($needle, array_map('mb_strtolower', $s['productionCompany']), true)
+        ));
+
+        return view('company', [
+            'shows'   => $this->slim($matches),
+            'company' => $name,
         ]);
     }
 
@@ -313,13 +488,13 @@ class ShowController extends Controller
         // dikirim sebagai string "A, B, C" (dipecah di detail.js)
         $multiString = ['genre', 'countryOfOrigin', 'inLanguage'];
         // dikirim sebagai array (nama bisa mengandung koma)
-        // actor & author dipakai sebagai link ke /person
+        // actor & author dipakai sebagai link ke /person, productionCompany ke /company
         $multiArray  = ['actor', 'author', 'spokenLanguage', 'platform', 'productionCompany'];
+        // 'rank' sengaja TIDAK ada di sini: rank dihitung sendiri lewat ranks()
         $single = [
             'name', 'description', 'image', 'award', 'contentRating', 'slogan',
             'startDate', 'endDate', 'numberOfSeasons', 'numberOfEpisodes',
-            'status', 'rank', 'tmdbId', 'tvdbId', 'wikidataId', 'imdbId',
-            'trailer', 'thumbnailUrl', 'alternateName',
+            'status', 'tmdbId', 'tvdbId', 'wikidataId', 'imdbId',
         ];
 
         $show  = ['id' => $id, 'uri' => $imdb];
@@ -360,7 +535,10 @@ class ShowController extends Controller
         $show['bestRating']       = isset($rt['best']) ? (float) $rt['best'] : 10;
         $show['worstRating']      = isset($rt['worst']) ? (float) $rt['worst'] : 1;
 
-        // Similar recommendation ( hanya memnculkan 12 series ) 
+        // Rank hasil hitung sendiri (sama dengan halaman Top Rated); 0 = tidak ada rank
+        $show['rank'] = $this->ranks()[$id] ?? 0;
+
+        // Similar recommendation (hanya memunculkan 12 series)
         $all = $this->loadShows();
         $cur = null;
         foreach ($all as $s) {
@@ -373,7 +551,7 @@ class ShowController extends Controller
         ];
         $similar = $this->similarTo($id, $cur, $all);
 
-        // 'shows' -> untuk carousel similar)
+        // 'shows' -> untuk carousel similar
         return view('detail', ['show' => $show, 'shows' => $similar]);
     }
 }

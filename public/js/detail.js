@@ -48,6 +48,8 @@
     const PLATFORM_URL = window.ITV_PLATFORM_URL || '/platform';
     const KEYWORD_URL = window.ITV_KEYWORD_URL || '/keyword';
     const PERSON_URL = window.ITV_PERSON_URL || '/person';
+    const TOP_RATED_URL = window.ITV_TOP_RATED_URL || '/top-rated';
+    const COMPANY_URL = window.ITV_COMPANY_URL || '/company';
 
     // nama orang (cast / creator) -> chip yang membuka /person?name=...
     const personChips = (names) => `<div class="chips chips--sm">${names.map((n) =>
@@ -76,12 +78,6 @@
 
     /*  Link eksternal (IMDb sudah ada tombolnya di atas)  */
     const imdbUrl = r.uri || `https://www.imdb.com/title/${r.imdbId || r.id}/`;
-
-    // Trailer (YouTube), backdrop (TMDB) & judul asli: hanya URL dari host yang diharapkan yang dipakai
-    const trailerUrl = /^https:\/\/(www\.)?youtube\.com\/watch\?v=[\w-]+$/i.test(r.trailer || '') ? r.trailer : '';
-    const backdrop = /^https:\/\/image\.tmdb\.org\//i.test(r.thumbnailUrl || '') ? r.thumbnailUrl : '';
-    const altName = r.alternateName && r.alternateName !== r.name ? r.alternateName : '';
-    const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
 
     const rawLinks = list(r.links);
     const find = (re) => rawLinks.find((u) => re.test(u));
@@ -159,8 +155,6 @@
     const similar = ITV.SHOWS && !ITV.USING_PLACEHOLDER ? ITV.SHOWS : [];
 
     document.getElementById('detail').innerHTML = `
-        ${backdrop ? `<div class="detail__backdrop" role="img" aria-label="Backdrop of ${esc(r.name)}"
-            style="background-image:linear-gradient(to top,rgba(0,0,0,.6),rgba(0,0,0,0) 65%),url('${esc(backdrop)}')"></div>` : ''}
         <div class="detail__top">
             <div class="detail__poster">
                 ${r.image
@@ -178,13 +172,9 @@
             <div class="detail__main">
                 <div class="detail__titlerow">
                     <h1 class="detail__title">${esc(r.name)}</h1>
-                    <div class="detail__btns">
-                        ${trailerUrl ? `<a class="imdb-btn trailer-btn" href="${esc(trailerUrl)}" target="_blank" rel="noopener noreferrer">${PLAY} Watch Trailer</a>` : ''}
-                        <a class="imdb-btn" href="${esc(imdbUrl)}" target="_blank" rel="noopener noreferrer">View on IMDb ${EXT}</a>
-                    </div>
+                    <a class="imdb-btn" href="${esc(imdbUrl)}" target="_blank" rel="noopener noreferrer">View on IMDb ${EXT}</a>
                 </div>
                 ${r.slogan ? `<p class="detail__slogan">“${esc(r.slogan)}”</p>` : ''}
-                ${altName ? `<p class="detail__alt">Original title: ${esc(altName)}</p>` : ''}
                 ${metaParts.length ? `<p class="detail__meta">${metaParts.map(esc).join(sep)}</p>` : ''}
 
                 <div class="detail__scorerow">
@@ -193,10 +183,10 @@
                         <p class="detail__votes">${votes} votes<small>Based on IMDb users rating</small></p>
                     </div>
                     ${rank ? `
-                    <div class="rankbox">
-                        <span>IMDb Rank</span>
+                    <a class="rankbox" href="${TOP_RATED_URL}?id=${encodeURIComponent(r.id)}" title="Lihat di Top Rated">
+                        <span>RANK</span>
                         <strong>#${fmt(rank)}</strong>
-                    </div>` : ''}
+                    </a>` : ''}
                 </div>
 
                 <hr class="line">
@@ -210,7 +200,9 @@
                     ${r.description ? `<section><h2>Overview</h2><p>${esc(r.description)}</p></section>` : ''}
                     ${creators.length ? `<section><h2>Created by</h2>${personChips(creators)}</section>` : ''}
                     ${cast.length ? `<section><h2>Main Cast</h2>${personChips(cast)}</section>` : ''}
-                    ${companies.length ? `<section><h2>Production Companies</h2><p>${companies.map(esc).join(sep)}</p></section>` : ''}
+                    ${companies.length ? `<section><h2>Production Companies</h2>
+                        <div class="chips chips--sm">${companies.map((c) => `<a class="chip chip--tag" href="${COMPANY_URL}?c=${encodeURIComponent(c)}">${esc(c)}</a>`).join('')}</div>
+                    </section>` : ''}
                     ${keywords.length ? `<section><h2>Keywords</h2>
                         <div class="chips chips--sm">${keywords.map((k) => `<a class="chip chip--tag" href="${KEYWORD_URL}?k=${encodeURIComponent(k)}">${esc(k)}</a>`).join('')}</div>
                     </section>` : ''}
@@ -261,10 +253,6 @@
                 <p class="awards__src">${esc(award)}</p>
             </section>` : ''}
 
-            ${extLinks.length ? `<section class="links"><h2>External Links</h2>
-                <div class="links__row">${extLinks.map(([n, u, c]) => `<a class="link-btn ${c}" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(n)} ${EXT}</a>`).join('')}</div>
-            </section>` : ''}
-
             ${r.tmdbId ? `<section class="reviews" id="reviews" data-tmdb-id="${esc(r.tmdbId)}">
                 <div class="reviews__head">
                     <h2>Reviews</h2>
@@ -274,8 +262,12 @@
                     <div class="rv rv--skeleton"></div>
                     <div class="rv rv--skeleton"></div>
                 </div>
-                <button type="button" class="reviews__more" id="reviewMore" hidden>Show more</button>
+                <nav class="reviews__pager" id="reviewPager" aria-label="Reviews pagination" hidden></nav>
                 <p class="reviews__src">Reviews are provided by TMDB users.</p>
+            </section>` : ''}
+
+            ${extLinks.length ? `<section class="links"><h2>External Links</h2>
+                <div class="links__row">${extLinks.map(([n, u, c]) => `<a class="link-btn ${c}" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(n)} ${EXT}</a>`).join('')}</div>
             </section>` : ''}
 
             <p class="detail__ids">${[
@@ -323,10 +315,10 @@
     const rvRoot = document.getElementById('reviews');
     if (rvRoot) {
         const rvList = rvRoot.querySelector('#reviewList');
-        const rvMore = rvRoot.querySelector('#reviewMore');
+        const rvPager = rvRoot.querySelector('#reviewPager');
         const rvCount = rvRoot.querySelector('#reviewCount');
-        const STEP = 3;
-        let reviews = [], shown = 0;
+        const PER_PAGE = 3;
+        let reviews = [], page = 1;
 
         const avatarUrl = (p) => {
             p = typeof p === 'string' ? p : '';
@@ -381,12 +373,36 @@
             });
         };
 
-        const rvRender = () => {
-            const next = reviews.slice(shown, shown + STEP);
-            rvList.insertAdjacentHTML('beforeend', next.map(rvCard).join(''));
+        // 1 2 3 ... 9 10 (dengan titik-titik kalau halamannya banyak)
+        const pageItems = (cur, total) => {
+            if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+            const set = [...new Set([1, total, cur - 1, cur, cur + 1])]
+                .filter((p) => p >= 1 && p <= total)
+                .sort((a, b) => a - b);
+            const out = [];
+            let last = 0;
+            set.forEach((p) => { if (p - last > 1) out.push('…'); out.push(p); last = p; });
+            return out;
+        };
+
+        const rvPagerRender = () => {
+            const pages = Math.ceil(reviews.length / PER_PAGE);
+            rvPager.hidden = pages <= 1;
+            if (pages <= 1) { rvPager.innerHTML = ''; return; }
+            rvPager.innerHTML =
+                `<button type="button" class="rvpg" data-page="${page - 1}" aria-label="Previous page"${page === 1 ? ' disabled' : ''}>${ARROW_L}</button>` +
+                pageItems(page, pages).map((p) => p === '…'
+                    ? '<span class="rvpg rvpg--gap">…</span>'
+                    : `<button type="button" class="rvpg${p === page ? ' is-active' : ''}" data-page="${p}"${p === page ? ' aria-current="page"' : ''}>${p}</button>`).join('') +
+                `<button type="button" class="rvpg" data-page="${page + 1}" aria-label="Next page"${page === pages ? ' disabled' : ''}>${ARROW_R}</button>`;
+        };
+
+        const rvRender = (scroll = false) => {
+            const from = (page - 1) * PER_PAGE;
+            rvList.innerHTML = reviews.slice(from, from + PER_PAGE).map(rvCard).join('');
             fitToggles();
-            shown += next.length;
-            rvMore.hidden = shown >= reviews.length;
+            rvPagerRender();
+            if (scroll) rvRoot.scrollIntoView({ behavior: 'smooth', block: 'start' });
         };
         const rvMessage = (text) => { rvList.innerHTML = `<p class="reviews__empty">${text}</p>`; };
 
@@ -396,7 +412,15 @@
             const open = b.previousElementSibling.classList.toggle('is-clamped') === false;
             b.textContent = open ? 'Show less' : 'Show more';
         });
-        rvMore.addEventListener('click', rvRender);
+
+        rvPager.addEventListener('click', (e) => {
+            const b = e.target.closest('.rvpg[data-page]');
+            if (!b || b.disabled) return;
+            const p = parseInt(b.dataset.page, 10);
+            if (!p || p === page) return;
+            page = p;
+            rvRender(true);
+        });
 
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 10000);

@@ -26,7 +26,8 @@ return [
         ],
     ],
 
-    'tmdb' => ['token' => env('TMDB_TOKEN')
+    'tmdb' => [
+        'token' => env('TMDB_TOKEN'),
     ],
 
 ];
