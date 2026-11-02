@@ -44,16 +44,24 @@
     const fmt = (n) => n.toLocaleString('en-US');
 
     /*  URL halaman lain */
-    const GENRE_URL = window.ITV_GENRE_URL || '/genre';
-    const PLATFORM_URL = window.ITV_PLATFORM_URL || '/platform';
+    const GENRE_URL = window.ITV_GENRE_URL || '/genre/';
+    const PLATFORM_URL = window.ITV_PLATFORM_URL || '/platform/';
     const KEYWORD_URL = window.ITV_KEYWORD_URL || '/keyword';
-    const PERSON_URL = window.ITV_PERSON_URL || '/person';
+    const PERSON_URL = window.ITV_PERSON_URL || '/person/';
     const TOP_RATED_URL = window.ITV_TOP_RATED_URL || '/top-rated';
-    const COMPANY_URL = window.ITV_COMPANY_URL || '/company';
+    const COMPANY_URL = window.ITV_COMPANY_URL || '/company/';
 
-    // nama orang (cast / creator) -> chip yang membuka /person?name=...
-    const personChips = (names) => `<div class="chips chips--sm">${names.map((n) =>
-        `<a class="chip chip--tag" href="${PERSON_URL}?name=${encodeURIComponent(n)}">${esc(n)}</a>`).join('')}</div>`;
+    // actor / author / productionCompany / genre / platform dari server: [{slug, name}]. String biasa (data contoh) tetap diterima, tanpa link.
+    const entities = (v) => (Array.isArray(v) ? v : list(v))
+        .map((p) => (typeof p === 'string'
+            ? { slug: '', name: p.trim() }
+            : { slug: String(p.slug || ''), name: String(p.name || '').trim() }))
+        .filter((p) => p.name);
+
+    // cast / creator / company -> chip yang membuka {base}{slug} (/person/{slug}, /company/{slug})
+    const entityChips = (items, base) => `<div class="chips chips--sm">${items.map((p) => p.slug
+        ? `<a class="chip chip--tag" href="${base}${encodeURIComponent(p.slug)}">${esc(p.name)}</a>`
+        : `<span class="chip chip--tag">${esc(p.name)}</span>`).join('')}</div>`;
 
     /*  Tahun & status  */
     const status = r.status || '';
@@ -141,12 +149,12 @@
 
     document.title = `${r.name} — ITV`;
 
-    const genres = list(r.genre);
-    const cast = list(r.actor);
-    const creators = list(r.author);
-    const companies = list(r.productionCompany);
+    const genres = entities(r.genre);
+    const cast = entities(r.actor);
+    const creators = entities(r.author);
+    const companies = entities(r.productionCompany);
     const keywords = list(r.keywords);
-    const platforms = list(r.platform);
+    const platforms = entities(r.platform);
 
     // baris meta di header
     const metaParts = [years, ...list(r.countryOfOrigin).slice(0, 1)].filter(Boolean);
@@ -193,22 +201,24 @@
 
                 ${genres.length ? `<section>
                     <h2>Genres</h2>
-                    <div class="chips">${genres.map((g) => `<a class="chip" href="${GENRE_URL}?genre=${encodeURIComponent(g)}">${esc(g)}</a>`).join('')}</div>
+                    <div class="chips">${genres.map((g) => g.slug
+                        ? `<a class="chip" href="${GENRE_URL}${encodeURIComponent(g.slug)}">${esc(g.name)}</a>`
+                        : `<span class="chip">${esc(g.name)}</span>`).join('')}</div>
                 </section>` : ''}
 
                 <div class="prose">
                     ${r.description ? `<section><h2>Overview</h2><p>${esc(r.description)}</p></section>` : ''}
-                    ${creators.length ? `<section><h2>Created by</h2>${personChips(creators)}</section>` : ''}
-                    ${cast.length ? `<section><h2>Main Cast</h2>${personChips(cast)}</section>` : ''}
-                    ${companies.length ? `<section><h2>Production Companies</h2>
-                        <div class="chips chips--sm">${companies.map((c) => `<a class="chip chip--tag" href="${COMPANY_URL}?c=${encodeURIComponent(c)}">${esc(c)}</a>`).join('')}</div>
-                    </section>` : ''}
+                    ${creators.length ? `<section><h2>Created by</h2>${entityChips(creators, PERSON_URL)}</section>` : ''}
+                    ${cast.length ? `<section><h2>Main Cast</h2>${entityChips(cast, PERSON_URL)}</section>` : ''}
+                    ${companies.length ? `<section><h2>Production Companies</h2>${entityChips(companies, COMPANY_URL)}</section>` : ''}
                     ${keywords.length ? `<section><h2>Keywords</h2>
                         <div class="chips chips--sm">${keywords.map((k) => `<a class="chip chip--tag" href="${KEYWORD_URL}?k=${encodeURIComponent(k)}">${esc(k)}</a>`).join('')}</div>
                     </section>` : ''}
                     ${platforms.length ? `<section class="platforms">
                         <h2>Platform</h2>
-                        <div class="chips">${platforms.map((p) => `<a class="chip" href="${PLATFORM_URL}?platform=${encodeURIComponent(p)}">${esc(p)}</a>`).join('')}</div>
+                        <div class="chips">${platforms.map((p) => p.slug
+                            ? `<a class="chip" href="${PLATFORM_URL}${encodeURIComponent(p.slug)}">${esc(p.name)}</a>`
+                            : `<span class="chip">${esc(p.name)}</span>`).join('')}</div>
                     </section>` : ''}
                 </div>
             </div>

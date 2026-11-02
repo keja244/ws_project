@@ -61,5 +61,9 @@
 @endsection
 
 @push('scripts')
+<script>
+    window.ITV_PLATFORMS = @json($tiles);
+    window.ITV_PLATFORM = @json($initial);
+</script>
 <script src="{{ asset('js/platform.js') }}" defer></script>
 @endpush

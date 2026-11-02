@@ -1,5 +1,6 @@
-/* Halaman production company: /company?c=Sony+Pictures+Television
-   Server sudah menyaring series dari company itu; di sini tinggal urut + pagination. */
+/* Halaman production company: /company/sony-pictures-television[?page=2]
+   Server sudah menyaring series dari company itu (lewat IRI organization:{slug} di Fuseki);
+   di sini tinggal urut + pagination. */
 (() => {
     'use strict';
     const { $, esc, SHOWS, USING_PLACEHOLDER, byRating, cardHTML, renderPager, getPage, setParams } = window.ITV;

@@ -8,15 +8,19 @@ Route::get('/', [ShowController::class, 'home']);
 
 Route::get('/search', [ShowController::class, 'search']);
 
-Route::get('/genre', [ShowController::class, 'genre']);
+Route::get('/genre/{slug?}', [ShowController::class, 'genre'])->where('slug', '[a-z0-9-]+');
 
-Route::get('/platform', [ShowController::class, 'platform']);
+Route::get('/api/genre/{slug}', [ShowController::class, 'genreShows'])->where('slug', '[a-z0-9-]+');
+
+Route::get('/platform/{slug?}', [ShowController::class, 'platform'])->where('slug', '[a-z0-9-]+');
+
+Route::get('/api/platform/{slug}', [ShowController::class, 'platformShows'])->where('slug', '[a-z0-9-]+');
 
 Route::get('/keyword', [ShowController::class, 'keyword']);
 
-Route::get('/company', [ShowController::class, 'company']);
+Route::get('/company/{slug}', [ShowController::class, 'company'])->where('slug', '[a-z0-9-]+');
 
-Route::get('/person', [ShowController::class, 'person']);
+Route::get('/person/{slug}', [ShowController::class, 'person'])->where('slug', '[a-z0-9-]+');
 
 Route::get('/top-rated', [ShowController::class, 'topRated']);
 

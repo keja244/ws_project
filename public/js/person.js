@@ -1,5 +1,6 @@
-/* Halaman person: /person?name=Bryan+Cranston[&role=actor|author][&page=2]
-   Server sudah menyaring series yang dibintangi ATAU dibuat orang itu dan mengirim 'roles' per series.
+/* Halaman person: /person/bryan-cranston[?role=actor|author][&page=2]
+   Server sudah menyaring series yang dibintangi ATAU dibuat orang itu (lewat IRI person:{slug} di Fuseki)
+   dan mengirim 'roles' per series.
    Di sini: tab peran (All / Acting / Created by), urut rating, pagination. */
 (() => {
     'use strict';

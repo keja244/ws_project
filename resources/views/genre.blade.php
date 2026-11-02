@@ -60,5 +60,9 @@
 @endsection
 
 @push('scripts')
+<script>
+    window.ITV_GENRES = @json($tiles);
+    window.ITV_GENRE = @json($initial);
+</script>
 <script src="{{ asset('js/genre.js') }}" defer></script>
 @endpush

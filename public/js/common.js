@@ -160,5 +160,5 @@ window.ITV = (() => {
         };
     };
 
-    return { $, $$, esc, SHOWS, USING_PLACEHOLDER, sortBy, byRating, byVotes, CATEGORIES, STAR, cardHTML, state, getPage, setParams, renderPager };
+    return { $, $$, esc, SHOWS, USING_PLACEHOLDER, normalize, sortBy, byRating, byVotes, CATEGORIES, STAR, cardHTML, state, getPage, setParams, renderPager };
 })();

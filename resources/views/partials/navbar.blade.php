@@ -28,8 +28,8 @@
 
         <nav class="nav__links">
             <a href="{{ url('/top-rated') }}" class="nav__btn {{ request()->is('top-rated') ? 'is-active' : '' }}">Top Rated</a>
-            <a href="{{ url('/genre') }}" class="nav__btn {{ request()->is('genre') ? 'is-active' : '' }}">Genre</a>
-            <a href="{{ url('/platform') }}" class="nav__btn {{ request()->is('platform') ? 'is-active' : '' }}">Platform</a>
+            <a href="{{ url('/genre') }}" class="nav__btn {{ request()->is('genre*') ? 'is-active' : '' }}">Genre</a>
+            <a href="{{ url('/platform') }}" class="nav__btn {{ request()->is('platform*') ? 'is-active' : '' }}">Platform</a>
         </nav>
     </div>
 </header>

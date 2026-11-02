@@ -1,6 +1,14 @@
 (() => {
     'use strict';
-    const { $, esc, SHOWS, byRating, cardHTML, getPage, setParams } = window.ITV;
+    const { $, esc, byRating, cardHTML, getPage, setParams, normalize } = window.ITV;
+    if (!normalize) {
+        console.error('[ITV] common.js belum mengekspor normalize. Tambahkan `normalize` pada baris return di common.js.');
+        return;
+    }
+
+    /* URL & endpoint (bisa ditimpa lewat window.ITV_GENRE_URL / ITV_GENRE_API) */
+    const BASE = window.ITV_GENRE_URL || '/genre/';
+    const API = window.ITV_GENRE_API || '/api/genre/';
 
     /* Pagination bergaya review (sama dengan pager Reviews di halaman detail) */
     const ARROW_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
@@ -45,38 +53,33 @@
         newest: (a, b) => b.start - a.start || byRating(a, b),
         seasons: (a, b) => b.seasons - a.seasons || byRating(a, b),
     };
+    // pencarian judul: tanpa huruf besar/kecil dan tanpa aksen
+    const fold = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
     /* State */
-    let current = null, sorted = [], page = 1;              // genre terpilih + hasil series
+    let current = null, currentName = '';                   // genre terpilih (slug + nama)
+    let all = [], sorted = [], page = 1;                    // series genre terpilih
+    let loading = false, seq = 0, ctrl = null;              // pemuat data (seq: abaikan respons basi)
     let tilePage = 1, showAll = false;                      // daftar tile genre
+    const cache = new Map();                                // slug -> series (sudah dinormalisasi)
 
-    /* Kelompokkan per genre */
-    const GENRES = new Map();
-    SHOWS.forEach((s) => s.genres.forEach((g) => {
-        if (!GENRES.has(g)) GENRES.set(g, []);
-        GENRES.get(g).push(s);
-    }));
-    const genreList = [...GENRES.entries()]
-        .map(([name, list]) => ({
-            name,
-            count: list.length,
-            cover: ([...list].sort(byRating).find((s) => s.image) || {}).image || '',
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+    /* Tile genre: datang dari server (query SPARQL ke entitas ex:Genre) */
+    const genreList = Array.isArray(window.ITV_GENRES) ? window.ITV_GENRES : [];
+    const BY_SLUG = new Map(genreList.map((g) => [g.slug, g]));
 
     const tileHTML = (g) => `
-        <a class="genre-tile${g.name === current ? ' is-selected' : ''}" href="?genre=${encodeURIComponent(g.name)}" data-genre="${esc(g.name)}">
+        <a class="genre-tile${g.slug === current ? ' is-selected' : ''}" href="${BASE}${encodeURIComponent(g.slug)}" data-genre="${esc(g.slug)}">
             ${g.cover ? `<img src="${esc(g.cover)}" alt="" loading="lazy" draggable="false" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
             <span class="genre-tile__label">
                 <span class="genre-tile__name">${esc(g.name)}</span>
-                <span class="genre-tile__count">${g.count.toLocaleString()} shows</span>
+                <span class="genre-tile__count">${Number(g.count).toLocaleString()} shows</span>
             </span>
         </a>`;
 
     const grid = $('#genreGrid'), moreWrap = $('#genreMoreWrap'), moreBtn = $('#genreMore'), tilePager = $('#genreTilePager');
     const tilePages = Math.max(1, Math.ceil(genreList.length / TILES_PER_PAGE));
 
-    // pager tile: style sama dengan pagination review di halaman detail 
+    // pager tile: style sama dengan pagination review di halaman detail
     const renderTilePager = () => renderPager(tilePager, {
         page: tilePage, pages: tilePages,
         onChange: (p) => { tilePage = p; renderTiles(); },
@@ -110,7 +113,7 @@
         showAll = !showAll;
         if (!showAll) {
             // kembali ke mode halaman: tampilkan halaman yang memuat genre terpilih (kalau ada)
-            const i = current ? genreList.findIndex((g) => g.name === current) : -1;
+            const i = current ? genreList.findIndex((g) => g.slug === current) : -1;
             tilePage = i >= 0 ? Math.floor(i / TILES_PER_PAGE) + 1 : 1;
         }
         renderTiles();
@@ -118,9 +121,9 @@
     });
 
     // pastikan tile genre terpilih terlihat (pindah ke halaman tile yang memuatnya)
-    const revealGenre = (name) => {
+    const revealGenre = (slug) => {
         if (showAll) return;
-        const i = genreList.findIndex((g) => g.name === name);
+        const i = genreList.findIndex((g) => g.slug === slug);
         if (i < 0) return;
         const p = Math.floor(i / TILES_PER_PAGE) + 1;
         if (p !== tilePage) { tilePage = p; renderTiles(); }
@@ -128,16 +131,35 @@
 
     renderTiles();
 
-    /*  Hasil per genre + search + pagination  */
+    /*  Data per genre: GET /api/genre/{slug} -> query SPARQL berbasis IRI genre  */
+    const loadShows = async (slug) => {
+        if (cache.has(slug)) return cache.get(slug);
+        if (ctrl) ctrl.abort();                             // klik tile lain: batalkan permintaan sebelumnya
+        ctrl = new AbortController();
+        const res = await fetch(API + encodeURIComponent(slug), { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(res.status);
+        const d = await res.json();
+        const shows = (d.shows || []).map(normalize);
+        cache.set(slug, shows);
+        return shows;
+    };
+
+    /*  Hasil per genre + search judul + pagination  */
     const section = $('#genreResults'), title = $('#resultsTitle'), status = $('#resultsStatus');
     const list = $('#genreShows'), sortSel = $('#sortSelect'), pager = $('#pager');
     const qForm = $('#genreSearch'), qInput = $('#genreQ'), qClear = $('#genreClear');
 
     const apply = () => {
-        const q = qInput.value.trim().toLowerCase();
-        let items = GENRES.get(current) || [];
-        if (q) items = items.filter((s) => s.name.toLowerCase().includes(q) || s.cast.toLowerCase().includes(q));
+        const q = fold(qInput.value.trim());
+        let items = all;
+        if (q) items = items.filter((s) => fold(s.name).includes(q));
         sorted = [...items].sort(SORTERS[sortSel.value]);
+    };
+
+    const showMessage = (text) => {
+        list.innerHTML = `<p class="results__empty">${esc(text)}</p>`;
+        status.textContent = '';
+        renderPager(pager, { page: 1, pages: 1, onChange() {} });
     };
 
     const render = (scroll) => {
@@ -149,7 +171,7 @@
 
         list.innerHTML = total
             ? sorted.slice(from, from + PER_PAGE).map(cardHTML).join('')
-            : `<p class="results__empty">No ${esc(current)} shows match “${esc(q)}”.</p>`;
+            : `<p class="results__empty">${q ? `No ${esc(currentName)} shows match “${esc(q)}”.` : `No ${esc(currentName)} shows.`}</p>`;
         status.textContent = total
             ? `${(from + 1).toLocaleString()}–${Math.min(from + PER_PAGE, total).toLocaleString()} of ${total.toLocaleString()} show${total === 1 ? '' : 's'}`
             : '';
@@ -161,44 +183,70 @@
     };
 
     const hideGenre = () => {
-        current = null; section.hidden = true; list.innerHTML = ''; document.title = 'Genre — ITV';
+        seq++; loading = false;                             // abaikan respons yang masih berjalan
+        if (ctrl) ctrl.abort();
+        current = null; currentName = ''; all = []; sorted = [];
+        section.hidden = true; list.innerHTML = ''; document.title = 'Genre — ITV';
         qInput.value = ''; qClear.hidden = true;
         grid.querySelectorAll('.genre-tile').forEach((t) => t.classList.remove('is-selected'));
     };
 
-    const showGenre = (name, p = 1, scroll = true, q = qInput.value) => {
-        if (!GENRES.has(name)) return hideGenre();
-        current = name; page = p;
+    const showGenre = async (slug, p = 1, scroll = true, q = qInput.value) => {
+        const tile = BY_SLUG.get(slug);
+        if (!tile) return hideGenre();
+        current = slug; currentName = tile.name; page = p;
         qInput.value = q; qClear.hidden = !q;
-        qInput.placeholder = `Search in ${name}...`;
-        title.textContent = name;
+        qInput.placeholder = `Search in ${tile.name}...`;
+        title.textContent = tile.name;
         section.hidden = false;
-        document.title = `${name} — ITV`;
-        revealGenre(name);
-        grid.querySelectorAll('.genre-tile').forEach((t) => t.classList.toggle('is-selected', t.dataset.genre === name));
-        apply();
-        render(scroll);
+        document.title = `${tile.name} — ITV`;
+        revealGenre(slug);
+        grid.querySelectorAll('.genre-tile').forEach((t) => t.classList.toggle('is-selected', t.dataset.genre === slug));
+
+        const my = ++seq;
+        if (cache.has(slug)) {                              // sudah pernah dibuka: instan
+            loading = false; all = cache.get(slug);
+            apply(); return render(scroll);
+        }
+
+        loading = true; all = []; sorted = [];
+        showMessage('Loading…');
+        if (scroll) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        try {
+            const shows = await loadShows(slug);
+            if (my !== seq) return;                         // sudah pindah genre lain
+            all = shows;
+        } catch (err) {
+            if (err.name === 'AbortError' || my !== seq) return;
+            console.error('[Genre]', err);
+            loading = false;
+            return showMessage(`Couldn’t load ${tile.name} shows right now. Please try again.`);
+        }
+        loading = false;
+        apply(); render(false);
     };
 
     grid.addEventListener('click', (e) => {
         const tile = e.target.closest('.genre-tile');
         if (!tile) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;   // buka di tab baru: biarkan
         e.preventDefault();
-        const name = tile.dataset.genre;
-        setParams({ genre: name, page: null, q: null }, 'push');
-        showGenre(name, 1, true, '');
+        const slug = tile.dataset.genre;
+        history.pushState(null, '', BASE + encodeURIComponent(slug));
+        showGenre(slug, 1, true, '');
     });
 
     sortSel.addEventListener('change', () => {
-        if (!current) return;
+        if (!current || loading) return;
+        page = 1;
         setParams({ page: null });
-        showGenre(current, 1, false);
+        apply(); render(false);
     });
 
-    // search di dalam genre
+    // search judul di dalam genre
     let t;
     const runSearch = () => {
-        if (!current) return;
+        if (!current || loading) return;
         const q = qInput.value.trim();
         qClear.hidden = !qInput.value;
         setParams({ q: q || null, page: null });
@@ -208,14 +256,19 @@
     qForm.addEventListener('submit', (e) => { e.preventDefault(); clearTimeout(t); runSearch(); });
     qClear.addEventListener('click', () => { qInput.value = ''; runSearch(); qInput.focus(); });
 
+    // slug genre dibaca dari path: /genre/{slug}
+    const pathSlug = () => {
+        const m = location.pathname.match(/\/genre\/([^/]+)\/?$/);
+        return m ? decodeURIComponent(m[1]) : null;
+    };
+
     window.addEventListener('popstate', () => {
+        const slug = pathSlug();
         const sp = new URLSearchParams(location.search);
-        const g = sp.get('genre');
-        g ? showGenre(g, getPage(), false, sp.get('q') || '') : hideGenre();
+        slug ? showGenre(slug, getPage(), false, sp.get('q') || '') : hideGenre();
     });
 
-    // buka langsung dari URL: /genre?genre=Romance&page=2&q=love (juga dari klik genre di halaman detail)
-    const sp = new URLSearchParams(location.search);
-    const initial = sp.get('genre') || window.ITV_GENRE;
-    if (initial) showGenre(initial, getPage(), true, sp.get('q') || '');
+    // buka langsung dari URL: /genre/romance?page=2&q=love (juga dari klik genre di halaman detail)
+    const initial = window.ITV_GENRE;
+    if (initial) showGenre(initial, getPage(), true, new URLSearchParams(location.search).get('q') || '');
 })();

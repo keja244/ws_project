@@ -14,6 +14,19 @@ class ShowController extends Controller
     // Subjek series di TTL: http://example.org/tvseries/series/tt0043208
     private const SERIES_NS = 'http://example.org/tvseries/series/';
 
+    // Subjek person di TTL: http://example.org/tvseries/person/bryan-cranston
+    private const PERSON_NS = 'http://example.org/tvseries/person/';
+
+    // Subjek company di TTL: http://example.org/tvseries/organization/sony-pictures-television
+    private const ORG_NS = 'http://example.org/tvseries/organization/';
+
+    // Subjek genre di TTL: http://example.org/tvseries/genre/sci-fi
+    private const GENRE_NS = 'http://example.org/tvseries/genre/';
+
+    // Subjek platform di TTL: http://example.org/tvseries/platform/netflix
+    // (BEDA dari company: organization:amc = produsen, platform:amc = penyiar)
+    private const PLATFORM_NS = 'http://example.org/tvseries/platform/';
+
     // Field yang hanya dikirim ke browser kalau diminta lewat allShows([...])
     // _g / _a = daftar genre & aktor dalam bentuk array (khusus perhitungan similar & halaman person, tidak pernah dikirim)
     private const OPTIONAL = ['description', 'keywords', 'platform', 'author','productionCompany', 'numberOfEpisodes', 'contentRating', 'status', 'duration', '_g', '_a'];
@@ -374,14 +387,181 @@ class ShowController extends Controller
         return response()->json(['message' => 'Terima kasih atas feedback-mu.']);
     }
 
-    public function genre()
+    /**
+     * Tile genre: satu entitas ex:Genre per tile (IRI -> slug), jumlah series lewat schema:genre,
+     * cover = series ber-rating tertinggi yang punya gambar. Hasil kecil, di-cache.
+     */
+    private function genreTiles(): array
     {
-        return view('genre', ['shows' => $this->allShows()]);
+        return Cache::remember('genre_tiles_v1', 3600, function () {
+            $rows = $this->sparql->query('
+                PREFIX schema: <https://schema.org/>
+                PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                PREFIX ex: <http://example.org/tvseries/vocab#>
+                SELECT ?g (SAMPLE(?label) AS ?labelValue) (COUNT(DISTINCT ?s) AS ?n)
+                WHERE {
+                    ?g a ex:Genre ; rdfs:label ?label .
+                    ?s a schema:TVSeries ; schema:genre ?g .
+                }
+                GROUP BY ?g
+            ');
+
+            // urut dari rating tertinggi: baris pertama per genre = cover-nya
+            $coverRows = $this->sparql->query('
+                PREFIX schema: <https://schema.org/>
+                PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+                SELECT ?g ?image
+                WHERE {
+                    ?s a schema:TVSeries ; schema:genre ?g ; schema:image ?image ;
+                       schema:aggregateRating ?r .
+                    ?r schema:ratingValue ?rating .
+                    OPTIONAL { ?r schema:ratingCount ?votes . }
+                }
+                ORDER BY DESC(xsd:decimal(?rating)) DESC(xsd:integer(?votes))
+            ');
+            $covers = [];
+            foreach ($coverRows as $r) {
+                $covers[$r['g']] ??= $r['image'];
+            }
+
+            $tiles = array_map(fn ($r) => [
+                'slug'  => basename(rtrim($r['g'], '/')),
+                'name'  => $r['labelValue'],
+                'count' => (int) $r['n'],
+                'cover' => $covers[$r['g']] ?? '',
+            ], $rows);
+
+            usort($tiles, fn ($a, $b) => strcasecmp($a['name'], $b['name']));
+            return $tiles;
+        });
     }
 
-    public function platform()
+    // /genre            -> daftar tile
+    // /genre/{slug}     -> daftar tile + hasil genre itu (dimuat browser lewat /api/genre/{slug})
+    // /genre?genre=Nama -> link lama: dialihkan ke /genre/{slug}
+    public function genre(Request $request, ?string $slug = null)
     {
-        return view('platform', ['shows' => $this->allShows(['platform'])]);
+        $tiles = $this->genreTiles();
+
+        if ($slug === null) {
+            $legacy = trim((string) $request->query('genre', ''));
+            if ($legacy !== '') {
+                foreach ($tiles as $t) {
+                    if (mb_strtolower($t['name']) === mb_strtolower($legacy)) {
+                        $rest = $request->except('genre');
+                        return redirect()->to(
+                            url('/genre/' . $t['slug']) . ($rest ? '?' . http_build_query($rest) : ''),
+                            301
+                        );
+                    }
+                }
+            }
+        } else {
+            abort_unless(in_array($slug, array_column($tiles, 'slug'), true), 404);
+        }
+
+        return view('genre', ['tiles' => $tiles, 'initial' => $slug]);
+    }
+
+    // /api/genre/drama -> series yang terhubung ke IRI genre:drama lewat schema:genre (JSON, di-cache per genre)
+    public function genreShows(string $slug)
+    {
+        abort_unless(preg_match('/^[a-z0-9-]+$/', $slug), 404);
+        abort_unless(in_array($slug, array_column($this->genreTiles(), 'slug'), true), 404);
+
+        $uri   = self::GENRE_NS . $slug;
+        $shows = Cache::remember('genre_shows_v1_' . $slug, 3600, fn () => $this->cardsLinkedTo('schema:genre', $uri));
+
+        return response()->json(['shows' => $shows]);
+    }
+
+    /**
+     * Tile platform: satu entitas ex:Platform per tile (IRI -> slug), jumlah series lewat ex:platform,
+     * cover = series ber-rating tertinggi yang punya gambar. Yang paling banyak series-nya di depan.
+     */
+    private function platformTiles(): array
+    {
+        return Cache::remember('platform_tiles_v1', 3600, function () {
+            $rows = $this->sparql->query('
+                PREFIX schema: <https://schema.org/>
+                PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                PREFIX ex: <http://example.org/tvseries/vocab#>
+                SELECT ?p (SAMPLE(?label) AS ?labelValue) (COUNT(DISTINCT ?s) AS ?n)
+                WHERE {
+                    ?p a ex:Platform ; rdfs:label ?label .
+                    ?s a schema:TVSeries ; ex:platform ?p .
+                }
+                GROUP BY ?p
+            ');
+
+            // urut dari rating tertinggi: baris pertama per platform = cover-nya
+            $coverRows = $this->sparql->query('
+                PREFIX schema: <https://schema.org/>
+                PREFIX ex: <http://example.org/tvseries/vocab#>
+                PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+                SELECT ?p ?image
+                WHERE {
+                    ?s a schema:TVSeries ; ex:platform ?p ; schema:image ?image ;
+                       schema:aggregateRating ?r .
+                    ?r schema:ratingValue ?rating .
+                    OPTIONAL { ?r schema:ratingCount ?votes . }
+                }
+                ORDER BY DESC(xsd:decimal(?rating)) DESC(xsd:integer(?votes))
+            ');
+            $covers = [];
+            foreach ($coverRows as $r) {
+                $covers[$r['p']] ??= $r['image'];
+            }
+
+            $tiles = array_map(fn ($r) => [
+                'slug'  => basename(rtrim($r['p'], '/')),
+                'name'  => $r['labelValue'],
+                'count' => (int) $r['n'],
+                'cover' => $covers[$r['p']] ?? '',
+            ], $rows);
+
+            usort($tiles, fn ($a, $b) => $b['count'] <=> $a['count'] ?: strcasecmp($a['name'], $b['name']));
+            return $tiles;
+        });
+    }
+
+    // /platform            -> daftar tile
+    // /platform/{slug}     -> daftar tile + hasil platform itu (dimuat browser lewat /api/platform/{slug})
+    // /platform?platform=Nama -> link lama: dialihkan ke /platform/{slug}
+    public function platform(Request $request, ?string $slug = null)
+    {
+        $tiles = $this->platformTiles();
+
+        if ($slug === null) {
+            $legacy = trim((string) $request->query('platform', ''));
+            if ($legacy !== '') {
+                foreach ($tiles as $t) {
+                    if (mb_strtolower($t['name']) === mb_strtolower($legacy)) {
+                        $rest = $request->except('platform');
+                        return redirect()->to(
+                            url('/platform/' . $t['slug']) . ($rest ? '?' . http_build_query($rest) : ''),
+                            301
+                        );
+                    }
+                }
+            }
+        } else {
+            abort_unless(in_array($slug, array_column($tiles, 'slug'), true), 404);
+        }
+
+        return view('platform', ['tiles' => $tiles, 'initial' => $slug]);
+    }
+
+    // /api/platform/netflix -> series yang terhubung ke IRI platform:netflix lewat ex:platform (JSON, di-cache per platform)
+    public function platformShows(string $slug)
+    {
+        abort_unless(preg_match('/^[a-z0-9-]+$/', $slug), 404);
+        abort_unless(in_array($slug, array_column($this->platformTiles(), 'slug'), true), 404);
+
+        $uri   = self::PLATFORM_NS . $slug;
+        $shows = Cache::remember('platform_shows_v1_' . $slug, 3600, fn () => $this->cardsLinkedTo('ex:platform', $uri));
+
+        return response()->json(['shows' => $shows]);
     }
 
     public function topRated()
@@ -411,47 +591,144 @@ class ShowController extends Controller
         ]);
     }
 
-    // /company?c=Sony+Pictures+Television -> hanya series dari company itu yang dikirim ke browser
-    public function company(Request $request)
+    /**
+     * rdfs:label dari satu IRI entitas (null kalau IRI itu tidak ada di graf).
+     * $iri harus dibangun dari namespace + slug yang sudah lolos regex.
+     */
+    private function labelOf(string $iri): ?string
     {
-        $name   = trim((string) $request->query('c', ''));
-        $needle = mb_strtolower($name);
+        $rows = $this->sparql->query("
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            SELECT ?label WHERE { <$iri> rdfs:label ?label . } LIMIT 1
+        ");
+        return $rows[0]['label'] ?? null;
+    }
 
-        $matches = $needle === '' ? [] : array_values(array_filter(
-            $this->loadShows(),
-            fn ($s) => in_array($needle, array_map('mb_strtolower', $s['productionCompany']), true)
-        ));
+    /**
+     * Series (field kartu saja) yang terhubung ke satu entitas lewat satu predikat:
+     *   ?s {$predicate} <$iri>
+     * Dipakai halaman company, genre (schema:genre), dan platform (ex:platform).
+     * $predicate HANYA boleh dari kode (konstanta), bukan dari input pengguna.
+     */
+    private function cardsLinkedTo(string $predicate, string $iri): array
+    {
+        $rows = $this->sparql->query("
+            PREFIX schema: <https://schema.org/>
+            PREFIX ex: <http://example.org/tvseries/vocab#>
+            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+            SELECT ?s
+                (SAMPLE(?name) AS ?nameValue)
+                (SAMPLE(?startDate) AS ?startDateValue)
+                (SAMPLE(?endDate) AS ?endDateValue)
+                (SAMPLE(?image) AS ?imageValue)
+                (SAMPLE(?rating) AS ?ratingValue)
+                (SAMPLE(?votes) AS ?votesValue)
+                (SAMPLE(?seasons) AS ?seasonsValue)
+            WHERE {
+                ?s $predicate <$iri> .
+                ?s a schema:TVSeries ; schema:name ?name .
+                OPTIONAL { ?s schema:startDate ?startDate . }
+                OPTIONAL { ?s schema:endDate ?endDate . }
+                OPTIONAL { ?s schema:image ?image . }
+                OPTIONAL { ?s schema:numberOfSeasons ?seasons . }
+                OPTIONAL {
+                    ?s schema:aggregateRating ?r .
+                    ?r schema:ratingValue ?rating .
+                    OPTIONAL { ?r schema:ratingCount ?votes . }
+                }
+            }
+            GROUP BY ?s
+            ORDER BY DESC(xsd:decimal(?ratingValue)) DESC(xsd:integer(?votesValue))
+        ");
+
+        return array_map(fn ($r) => [
+            'id'               => basename(rtrim($r['s'], '/')),
+            'name'             => $r['nameValue'],
+            'aggregateRating'  => isset($r['ratingValue']) ? (float) $r['ratingValue'] : 0,
+            'interactionCount' => isset($r['votesValue']) ? (int) $r['votesValue'] : 0,
+            'startDate'        => $r['startDateValue'] ?? null,
+            'endDate'          => $r['endDateValue'] ?? null,
+            'image'            => $r['imageValue'] ?? '',
+            'numberOfSeasons'  => $r['seasonsValue'] ?? null,
+        ], $rows);
+    }
+
+    // /company/sony-pictures-television -> series yang diproduksi company itu.
+    // Dicari lewat IRI organization:{slug} di Fuseki, bukan lewat pencocokan nama.
+    public function company(string $slug)
+    {
+        abort_unless(preg_match('/^[a-z0-9-]+$/', $slug), 404);
+
+        $uri   = self::ORG_NS . $slug;
+        $label = $this->labelOf($uri);
+        abort_if($label === null, 404);
 
         return view('company', [
-            'shows'   => $this->slim($matches),
-            'company' => $name,
+            'shows'   => $this->cardsLinkedTo('schema:productionCompany', $uri),
+            'company' => $label,
         ]);
     }
 
-    // /person?name=Bryan+Cranston -> series yang dibintangi ATAU dibuat orang itu.
+    // /person/bryan-cranston -> series yang dibintangi ATAU dibuat orang itu.
+    // Dicari lewat IRI person:{slug} di Fuseki, bukan lewat pencocokan nama.
     // 'roles' (actor / author) dikirim per series supaya halaman bisa menyaring per peran.
-    public function person(Request $request)
+    public function person(string $slug)
     {
-        $name   = trim((string) $request->query('name', ''));
-        $needle = mb_strtolower($name);
-        $lower  = fn (array $names) => array_map('mb_strtolower', $names);
+        abort_unless(preg_match('/^[a-z0-9-]+$/', $slug), 404);
 
-        $matches = [];
-        if ($needle !== '') {
-            foreach ($this->loadShows() as $s) {
-                $roles = [];
-                if (in_array($needle, $lower($s['_a']), true))      $roles[] = 'actor';
-                if (in_array($needle, $lower($s['author']), true))  $roles[] = 'author';
-                if ($roles) {
-                    $s['roles'] = $roles;
-                    $matches[] = $s;
+        $uri = self::PERSON_NS . $slug;
+
+        // 1) Orangnya ada? (sekaligus mengambil label untuk judul halaman)
+        $who = $this->sparql->query("
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            SELECT ?label WHERE { <$uri> rdfs:label ?label . } LIMIT 1
+        ");
+        abort_if(empty($who), 404);
+
+        // 2) Series dengan orang ini sebagai aktor dan/atau author, plus field kartu
+        $rows = $this->sparql->query("
+            PREFIX schema: <https://schema.org/>
+            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+            SELECT ?s
+                (SAMPLE(?name) AS ?nameValue)
+                (SAMPLE(?startDate) AS ?startDateValue)
+                (SAMPLE(?endDate) AS ?endDateValue)
+                (SAMPLE(?image) AS ?imageValue)
+                (SAMPLE(?rating) AS ?ratingValue)
+                (SAMPLE(?votes) AS ?votesValue)
+                (GROUP_CONCAT(DISTINCT ?role; separator='|') AS ?roles)
+            WHERE {
+                { ?s schema:actor <$uri> . BIND('actor' AS ?role) }
+                UNION
+                { ?s schema:author <$uri> . BIND('author' AS ?role) }
+                ?s a schema:TVSeries ; schema:name ?name .
+                OPTIONAL { ?s schema:startDate ?startDate . }
+                OPTIONAL { ?s schema:endDate ?endDate . }
+                OPTIONAL { ?s schema:image ?image . }
+                OPTIONAL {
+                    ?s schema:aggregateRating ?r .
+                    ?r schema:ratingValue ?rating .
+                    OPTIONAL { ?r schema:ratingCount ?votes . }
                 }
             }
-        }
+            GROUP BY ?s
+            ORDER BY DESC(xsd:decimal(?ratingValue)) DESC(xsd:integer(?votesValue))
+        ");
+
+        $shows = array_map(fn ($r) => [
+            'id'               => basename(rtrim($r['s'], '/')),
+            'name'             => $r['nameValue'],
+            'aggregateRating'  => isset($r['ratingValue']) ? (float) $r['ratingValue'] : 0,
+            'interactionCount' => isset($r['votesValue']) ? (int) $r['votesValue'] : 0,
+            'startDate'        => $r['startDateValue'] ?? null,
+            'endDate'          => $r['endDateValue'] ?? null,
+            'image'            => $r['imageValue'] ?? '',
+            'roles'            => self::labels($r['roles'] ?? null),
+        ], $rows);
 
         return view('person', [
-            'shows'  => $this->slim($matches),
-            'person' => $name,
+            'shows'  => $shows,
+            'person' => $who[0]['label'],
         ]);
     }
 
@@ -486,10 +763,12 @@ class ShowController extends Controller
         ");
 
         // dikirim sebagai string "A, B, C" (dipecah di detail.js)
-        $multiString = ['genre', 'countryOfOrigin', 'inLanguage'];
+        $multiString = ['countryOfOrigin', 'inLanguage'];
         // dikirim sebagai array (nama bisa mengandung koma)
-        // actor & author dipakai sebagai link ke /person, productionCompany ke /company
-        $multiArray  = ['actor', 'author', 'spokenLanguage', 'platform', 'productionCompany'];
+        // actor, author, productionCompany, genre, platform TIDAK di sini: dikirim terpisah sebagai [{slug, name}]
+        // untuk link ke /person/{slug}, /company/{slug}, /genre/{slug}, dan /platform/{slug}
+        $multiArray  = ['spokenLanguage'];
+        $linkedKeys  = ['actor', 'author', 'productionCompany', 'genre', 'platform'];
         // 'rank' sengaja TIDAK ada di sini: rank dihitung sendiri lewat ranks()
         $single = [
             'name', 'description', 'image', 'award', 'contentRating', 'slogan',
@@ -499,6 +778,7 @@ class ShowController extends Controller
 
         $show  = ['id' => $id, 'uri' => $imdb];
         $lists = [];
+        $linked = array_fill_keys($linkedKeys, []); // slug => nama (kunci slug mencegah duplikat)
         $keywords = [];
         $links = [];
 
@@ -507,7 +787,9 @@ class ShowController extends Controller
             $val = $r['o'];
             $lbl = !empty($r['ol']) ? $r['ol'] : self::label($val);
 
-            if (in_array($key, $multiString, true) || in_array($key, $multiArray, true)) {
+            if (in_array($key, $linkedKeys, true)) {
+                $linked[$key][basename(rtrim($val, '/'))] = $lbl;
+            } elseif (in_array($key, $multiString, true) || in_array($key, $multiArray, true)) {
                 $lists[$key][] = $lbl;
             } elseif ($key === 'keywords') {
                 $keywords[] = $val;
@@ -525,6 +807,13 @@ class ShowController extends Controller
         }
         foreach ($multiArray as $k) {
             $show[$k] = array_values(array_unique($lists[$k] ?? []));
+        }
+        foreach ($linkedKeys as $k) {
+            $show[$k] = [];
+            foreach ($linked[$k] as $slug => $name) {
+                // (string): slug berupa angka murni otomatis jadi int sebagai kunci array PHP
+                $show[$k][] = ['slug' => (string) $slug, 'name' => $name];
+            }
         }
         $show['keywords'] = array_values(array_unique($keywords));
         $show['links']    = array_values(array_unique($links));
@@ -545,8 +834,8 @@ class ShowController extends Controller
             if ($s['id'] === $id) { $cur = $s; break; }
         }
         $cur ??= [
-            '_g'       => array_values(array_filter(array_map('trim', explode(',', $show['genre'] ?? '')))),
-            '_a'       => array_values((array) ($show['actor'] ?? [])),
+            '_g'       => array_column($show['genre'], 'name'),
+            '_a'       => array_column($show['actor'], 'name'),
             'keywords' => array_map('mb_strtolower', $show['keywords']),
         ];
         $similar = $this->similarTo($id, $cur, $all);

@@ -1,8 +1,16 @@
-/* Halaman Platform: /platform?platform=AMC&page=2&q=breaking
-   Struktur sama dengan genre.js. */
+/* Halaman Platform: /platform/amc?page=2&q=breaking
+   Struktur sama dengan genre.js. Tile + keanggotaan platform datang dari graf (ex:Platform, ex:platform). */
 (() => {
     'use strict';
-    const { $, esc, SHOWS, USING_PLACEHOLDER, byRating, cardHTML, getPage, setParams } = window.ITV;
+    const { $, esc, byRating, cardHTML, getPage, setParams, normalize } = window.ITV;
+    if (!normalize) {
+        console.error('[ITV] common.js belum mengekspor normalize. Tambahkan `normalize` pada baris return di common.js.');
+        return;
+    }
+
+    /* URL & endpoint (bisa ditimpa lewat window.ITV_PLATFORM_URL / ITV_PLATFORM_API) */
+    const BASE = window.ITV_PLATFORM_URL || '/platform/';
+    const API = window.ITV_PLATFORM_API || '/api/platform/';
 
     /* Pagination bergaya review (sama dengan pager Reviews di halaman detail) */
     const ARROW_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
@@ -47,29 +55,26 @@
         newest: (a, b) => b.start - a.start || byRating(a, b),
         seasons: (a, b) => b.seasons - a.seasons || byRating(a, b),
     };
+    // pencarian judul: tanpa huruf besar/kecil dan tanpa aksen
+    const fold = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
-    /* Kelompokkan per platform */
-    const PLATFORMS = new Map();
-    (USING_PLACEHOLDER ? [] : SHOWS).forEach((s) => (s.platforms || []).forEach((p) => {
-        if (!PLATFORMS.has(p)) PLATFORMS.set(p, []);
-        PLATFORMS.get(p).push(s);
-    }));
+    /* State */
+    let current = null, currentName = '';                   // platform terpilih (slug + nama)
+    let all = [], sorted = [], page = 1;                    // series platform terpilih
+    let loading = false, seq = 0, ctrl = null;              // pemuat data (seq: abaikan respons basi)
+    let tilePage = 1, showAll = false;                      // daftar tile platform
+    const cache = new Map();                                // slug -> series (sudah dinormalisasi)
 
-    // yang paling banyak show-nya di depan
-    const platformList = [...PLATFORMS.entries()]
-        .map(([name, list]) => ({
-            name,
-            count: list.length,
-            cover: ([...list].sort(byRating).find((s) => s.image) || {}).image || '',
-        }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    /* Tile platform: datang dari server (query SPARQL ke entitas ex:Platform), paling banyak show di depan */
+    const platformList = Array.isArray(window.ITV_PLATFORMS) ? window.ITV_PLATFORMS : [];
+    const BY_SLUG = new Map(platformList.map((p) => [p.slug, p]));
 
     const tileHTML = (g) => `
-        <a class="genre-tile${g.name === current ? ' is-selected' : ''}" href="?platform=${encodeURIComponent(g.name)}" data-platform="${esc(g.name)}">
+        <a class="genre-tile${g.slug === current ? ' is-selected' : ''}" href="${BASE}${encodeURIComponent(g.slug)}" data-platform="${esc(g.slug)}">
             ${g.cover ? `<img src="${esc(g.cover)}" alt="" loading="lazy" draggable="false" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
             <span class="genre-tile__label">
                 <span class="genre-tile__name">${esc(g.name)}</span>
-                <span class="genre-tile__count">${g.count.toLocaleString()} show${g.count === 1 ? '' : 's'}</span>
+                <span class="genre-tile__count">${Number(g.count).toLocaleString()} show${Number(g.count) === 1 ? '' : 's'}</span>
             </span>
         </a>`;
 
@@ -83,10 +88,8 @@
 
     /*  Pagination + Show all / Show less untuk daftar tile platform */
     const TILE_PAGES = Math.ceil(platformList.length / TILES_PER_PAGE);
-    let current = null;
-    let tilePage = 1, showAll = false;
 
-    // pager tile: style sama dengan pagination review di halaman detail 
+    // pager tile: style sama dengan pagination review di halaman detail
     const renderTilePager = () => renderPager(tilesPager, {
         page: tilePage, pages: TILE_PAGES,
         onChange: (p) => { tilePage = p; renderTiles(true); },
@@ -124,16 +127,16 @@
         showAll = !showAll;
         if (!showAll) {
             // kembali ke mode halaman: tampilkan halaman yang memuat platform terpilih (kalau ada)
-            const i = current ? platformList.findIndex((g) => g.name === current) : -1;
+            const i = current ? platformList.findIndex((g) => g.slug === current) : -1;
             tilePage = i >= 0 ? Math.floor(i / TILES_PER_PAGE) + 1 : 1;
         }
         renderTiles(!showAll);
     });
 
     // pindah ke halaman tile yang memuat platform ini (dipakai saat dibuka dari URL / chip di detail)
-    const revealPlatform = (name) => {
+    const revealPlatform = (slug) => {
         if (showAll) return;
-        const i = platformList.findIndex((g) => g.name === name);
+        const i = platformList.findIndex((g) => g.slug === slug);
         if (i < 0) return;
         const p = Math.floor(i / TILES_PER_PAGE) + 1;
         if (p !== tilePage) { tilePage = p; renderTiles(false); }
@@ -141,17 +144,35 @@
 
     renderTiles(false);
 
-    /*  Hasil per platform + search + pagination  */
+    /*  Data per platform: GET /api/platform/{slug} -> query SPARQL berbasis IRI platform  */
+    const loadShows = async (slug) => {
+        if (cache.has(slug)) return cache.get(slug);
+        if (ctrl) ctrl.abort();                             // klik tile lain: batalkan permintaan sebelumnya
+        ctrl = new AbortController();
+        const res = await fetch(API + encodeURIComponent(slug), { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(res.status);
+        const d = await res.json();
+        const shows = (d.shows || []).map(normalize);
+        cache.set(slug, shows);
+        return shows;
+    };
+
+    /*  Hasil per platform + search judul + pagination  */
     const section = $('#platformResults'), title = $('#resultsTitle'), status = $('#resultsStatus');
     const list = $('#platformShows'), sortSel = $('#sortSelect'), pager = $('#pager');
     const qForm = $('#platformSearch'), qInput = $('#platformQ'), qClear = $('#platformClear');
-    let sorted = [], page = 1;
 
     const apply = () => {
-        const q = qInput.value.trim().toLowerCase();
-        let items = PLATFORMS.get(current) || [];
-        if (q) items = items.filter((s) => s.name.toLowerCase().includes(q) || s.cast.toLowerCase().includes(q));
+        const q = fold(qInput.value.trim());
+        let items = all;
+        if (q) items = items.filter((s) => fold(s.name).includes(q));
         sorted = [...items].sort(SORTERS[sortSel.value]);
+    };
+
+    const showMessage = (text) => {
+        list.innerHTML = `<p class="results__empty">${esc(text)}</p>`;
+        status.textContent = '';
+        renderPager(pager, { page: 1, pages: 1, onChange() {} });
     };
 
     const render = (scroll) => {
@@ -163,7 +184,7 @@
 
         list.innerHTML = total
             ? sorted.slice(from, from + PER_PAGE).map(cardHTML).join('')
-            : `<p class="results__empty">No shows on ${esc(current)} match “${esc(q)}”.</p>`;
+            : `<p class="results__empty">${q ? `No shows on ${esc(currentName)} match “${esc(q)}”.` : `No shows on ${esc(currentName)}.`}</p>`;
         status.textContent = total
             ? `${(from + 1).toLocaleString()}–${Math.min(from + PER_PAGE, total).toLocaleString()} of ${total.toLocaleString()} show${total === 1 ? '' : 's'}`
             : '';
@@ -175,44 +196,70 @@
     };
 
     const hidePlatform = () => {
-        current = null; section.hidden = true; list.innerHTML = ''; document.title = 'Platform — ITV';
+        seq++; loading = false;                             // abaikan respons yang masih berjalan
+        if (ctrl) ctrl.abort();
+        current = null; currentName = ''; all = []; sorted = [];
+        section.hidden = true; list.innerHTML = ''; document.title = 'Platform — ITV';
         qInput.value = ''; qClear.hidden = true;
         markSelected();
     };
 
-    const showPlatform = (name, p = 1, scroll = true, q = qInput.value) => {
-        if (!PLATFORMS.has(name)) return hidePlatform();
-        current = name; page = p;
+    const showPlatform = async (slug, p = 1, scroll = true, q = qInput.value) => {
+        const tile = BY_SLUG.get(slug);
+        if (!tile) return hidePlatform();
+        current = slug; currentName = tile.name; page = p;
         qInput.value = q; qClear.hidden = !q;
-        qInput.placeholder = `Search in ${name}...`;
-        title.textContent = name;
+        qInput.placeholder = `Search in ${tile.name}...`;
+        title.textContent = tile.name;
         section.hidden = false;
-        document.title = `${name} — ITV`;
-        revealPlatform(name);
+        document.title = `${tile.name} — ITV`;
+        revealPlatform(slug);
         markSelected();
-        apply();
-        render(scroll);
+
+        const my = ++seq;
+        if (cache.has(slug)) {                              // sudah pernah dibuka: instan
+            loading = false; all = cache.get(slug);
+            apply(); return render(scroll);
+        }
+
+        loading = true; all = []; sorted = [];
+        showMessage('Loading…');
+        if (scroll) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        try {
+            const shows = await loadShows(slug);
+            if (my !== seq) return;                         // sudah pindah platform lain
+            all = shows;
+        } catch (err) {
+            if (err.name === 'AbortError' || my !== seq) return;
+            console.error('[Platform]', err);
+            loading = false;
+            return showMessage(`Couldn’t load ${tile.name} shows right now. Please try again.`);
+        }
+        loading = false;
+        apply(); render(false);
     };
 
     grid.addEventListener('click', (e) => {
         const tile = e.target.closest('.genre-tile');
         if (!tile) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;   // buka di tab baru: biarkan
         e.preventDefault();
-        const name = tile.dataset.platform;
-        setParams({ platform: name, page: null, q: null }, 'push');
-        showPlatform(name, 1, true, '');
+        const slug = tile.dataset.platform;
+        history.pushState(null, '', BASE + encodeURIComponent(slug));
+        showPlatform(slug, 1, true, '');
     });
 
     sortSel.addEventListener('change', () => {
-        if (!current) return;
+        if (!current || loading) return;
+        page = 1;
         setParams({ page: null });
-        showPlatform(current, 1, false);
+        apply(); render(false);
     });
 
-    // search di dalam platform
+    // search judul di dalam platform
     let t;
     const runSearch = () => {
-        if (!current) return;
+        if (!current || loading) return;
         const q = qInput.value.trim();
         qClear.hidden = !qInput.value;
         setParams({ q: q || null, page: null });
@@ -222,14 +269,19 @@
     qForm.addEventListener('submit', (e) => { e.preventDefault(); clearTimeout(t); runSearch(); });
     qClear.addEventListener('click', () => { qInput.value = ''; runSearch(); qInput.focus(); });
 
+    // slug platform dibaca dari path: /platform/{slug}
+    const pathSlug = () => {
+        const m = location.pathname.match(/\/platform\/([^/]+)\/?$/);
+        return m ? decodeURIComponent(m[1]) : null;
+    };
+
     window.addEventListener('popstate', () => {
+        const slug = pathSlug();
         const sp = new URLSearchParams(location.search);
-        const p = sp.get('platform');
-        p ? showPlatform(p, getPage(), false, sp.get('q') || '') : hidePlatform();
+        slug ? showPlatform(slug, getPage(), false, sp.get('q') || '') : hidePlatform();
     });
 
-    // buka langsung dari URL: /platform?platform=AMC&page=2&q=walking (dari chip di halaman detail)
-    const sp = new URLSearchParams(location.search);
-    const initial = sp.get('platform');
-    if (initial) showPlatform(initial, getPage(), true, sp.get('q') || '');
+    // buka langsung dari URL: /platform/amc?page=2&q=walking (juga dari chip di halaman detail)
+    const initial = window.ITV_PLATFORM;
+    if (initial) showPlatform(initial, getPage(), true, new URLSearchParams(location.search).get('q') || '');
 })();
