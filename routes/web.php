@@ -6,7 +6,9 @@ use App\Http\Controllers\ReviewController;
 
 Route::get('/', [ShowController::class, 'home']);
 
-Route::get('/search', [ShowController::class, 'search']);
+Route::get('/search', [ShowController::class, 'search'])->middleware('throttle:60,1');
+
+Route::get('/api/search', [ShowController::class, 'searchApi'])->middleware('throttle:60,1');
 
 Route::get('/genre/{slug?}', [ShowController::class, 'genre'])->where('slug', '[a-z0-9-]+');
 
@@ -16,7 +18,7 @@ Route::get('/platform/{slug?}', [ShowController::class, 'platform'])->where('slu
 
 Route::get('/api/platform/{slug}', [ShowController::class, 'platformShows'])->where('slug', '[a-z0-9-]+');
 
-Route::get('/keyword', [ShowController::class, 'keyword']);
+Route::get('/keyword', [ShowController::class, 'keyword'])->middleware('throttle:60,1');
 
 Route::get('/company/{slug}', [ShowController::class, 'company'])->where('slug', '[a-z0-9-]+');
 
@@ -24,9 +26,9 @@ Route::get('/person/{slug}', [ShowController::class, 'person'])->where('slug', '
 
 Route::get('/top-rated', [ShowController::class, 'topRated']);
 
-Route::get('/category/{slug}', [ShowController::class, 'category']);
+Route::get('/category/{slug}', [ShowController::class, 'category'])->where('slug', '[a-z-]+');
 
-Route::get('/detail/{id}', [ShowController::class, 'detail']);
+Route::get('/detail/{id}', [ShowController::class, 'detail'])->where('id', 'tt[0-9]+');
 
 Route::get('/api/reviews/{tmdbId}', [ReviewController::class, 'show'])->whereNumber('tmdbId');
 
