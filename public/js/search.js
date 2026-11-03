@@ -7,7 +7,7 @@
    Dropdown: klik di luar -> tertutup, klik bar lagi -> terbuka lagi. */
 (() => {
     'use strict';
-    const { $, esc, SHOWS, cardHTML, renderPager, getPage } = window.ITV;
+    const { $, esc, normalize, cardHTML, renderPager, getPage } = window.ITV;
     const E = window.ITV.engine;
     if (!E) {
         console.error('[ITV] search-core.js belum dimuat. Pastikan file public/js/search-core.js ada, dan resources/views/search.blade.php versi baru terpasang (memuat search-core.js sebelum search.js).');
@@ -18,7 +18,21 @@
     const LIMIT = 7;            // saran di dropdown
     const PER_PAGE = 21;        // hasil per halaman (3 baris x 7)
     const fmt = (n) => n.toLocaleString('en-US');
-    const FAC = E.facets(SHOWS);
+
+    // Facet (genre, platform, negara, rentang tahun) datang dari SPARQL lewat window.ITV_FACETS
+    const FAC = window.ITV_FACETS || { genres: [], platforms: [], countries: [], minYear: 1950, maxYear: new Date().getFullYear() };
+
+    // Hasil pencarian diambil dari SPARQL lewat /api/search (filter, skor, urutan, pagination dikerjakan di server)
+    const API = window.ITV_SEARCH_API || '/api/search';
+    const fetchShows = async (params, { page = 1, per = PER_PAGE } = {}) => {
+        const qs = E.paramsToQuery(params, { page: page > 1 ? page : '', per });
+        const res = await fetch(`${API}?${qs}`, { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        return { total: data.total, page: data.page, pages: data.pages, shows: data.shows.map(normalize) };
+    };
+    let sugSeq = 0;             // penanda permintaan saran terbaru (abaikan respons lama)
+    let resSeq = 0;             // penanda permintaan hasil terbaru
 
     const input = $('#navInput'), form = $('#navSearch');
     const dd = $('#spDd'), list = $('#spList'), ddScopes = $('#spScopes');
@@ -118,19 +132,30 @@
             </div>
         </a>`;
 
-    const renderSuggest = () => {
+    const renderSuggest = async () => {
         const N = E.clone(P);
         N.q = input.value.trim();
         N.sort = N.q ? 'relevance' : 'votes';
-        const all = E.filter(SHOWS, N);
-        const top = all.slice(0, LIMIT);
+        const seq = ++sugSeq;
+
+        let r;
+        try {
+            r = await fetchShows(N, { per: LIMIT });
+        } catch (err) {
+            if (seq !== sugSeq) return;
+            list.innerHTML = '<p class="sp__empty">Could not load results. Please try again.</p>';
+            return;
+        }
+        if (seq !== sugSeq) return;     // ada permintaan yang lebih baru
+
+        const top = r.shows;
         const toks = E.tokensOf(N.q);
         const scopeNote = N.in === 'all' ? '' : ` in ${E.scopeLabel(N.in).toLowerCase()}`;
 
         list.innerHTML = top.length
             ? `<div class="sp__head">${N.q ? `Top results for “${esc(N.q)}”${scopeNote}` : 'Most popular series'}</div>`
                 + top.map((s) => rowHTML(s, toks)).join('')
-                + (all.length > top.length || N.q ? `<button type="button" class="sp__all" id="spAll">See all ${fmt(all.length)} result${all.length === 1 ? '' : 's'}${N.q ? ` for “${esc(N.q)}”` : ''}</button>` : '')
+                + (r.total > top.length || N.q ? `<button type="button" class="sp__all" id="spAll">See all ${fmt(r.total)} result${r.total === 1 ? '' : 's'}${N.q ? ` for “${esc(N.q)}”` : ''}</button>` : '')
             : '<p class="sp__empty">No series found. Try another search, scope, or fewer filters.</p>';
     };
 
@@ -146,12 +171,9 @@
             + (chips.length > 1 ? '<button type="button" class="fchip fchip--clear" id="srClearAll">Clear all</button>' : '');
     };
 
-    const renderResults = (scroll) => {
-        const all = E.filter(SHOWS, P);
-        const total = all.length;
-        const pages = Math.max(1, Math.ceil(total / PER_PAGE));
-        page = Math.min(Math.max(page, 1), pages);
-        const from = (page - 1) * PER_PAGE;
+    const renderResults = async (scroll) => {
+        const seq = ++resSeq;
+        const wanted = page;
 
         applied = true;
         hint.hidden = true;
@@ -160,9 +182,28 @@
         document.title = `${P.q || 'Filtered results'} — Search — ITV`;
         sortSel.value = P.sort || (P.q ? 'relevance' : 'rating');
         renderChips();
+        status.textContent = 'Loading…';
+
+        let r;
+        try {
+            r = await fetchShows(P, { page });
+        } catch (err) {
+            if (seq !== resSeq) return;
+            grid.innerHTML = '<p class="results__empty">Could not load results. Please try again.</p>';
+            status.textContent = '';
+            pager.hidden = true;
+            return;
+        }
+        if (seq !== resSeq) return;     // ada permintaan yang lebih baru (atau hasil sudah direset)
+
+        const total = r.total;
+        const pages = r.pages;
+        page = r.page;                  // server sudah membatasi halaman ke rentang yang valid
+        if (page !== wanted) writeUrl(false);
+        const from = (page - 1) * PER_PAGE;
 
         grid.innerHTML = total
-            ? all.slice(from, from + PER_PAGE).map(cardHTML).join('')
+            ? r.shows.map(cardHTML).join('')
             : '<p class="results__empty">No series match these criteria. Try another scope, or remove a filter.</p>';
         status.textContent = total
             ? `${fmt(from + 1)}–${fmt(Math.min(from + PER_PAGE, total))} of ${fmt(total)} result${total === 1 ? '' : 's'}`
@@ -175,6 +216,7 @@
     };
 
     const clearResults = () => {
+        resSeq++;                       // batalkan permintaan hasil yang masih berjalan
         applied = false; page = 1;
         section.hidden = true; grid.innerHTML = ''; hint.hidden = false;
         document.title = 'Search — ITV';

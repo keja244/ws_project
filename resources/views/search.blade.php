@@ -83,6 +83,8 @@
 @endsection
 
 @push('scripts')
+{{-- Facet panel filter (genre, platform, negara, rentang tahun) dari SPARQL; hasil pencarian diambil lewat /api/search --}}
+<script>window.ITV_FACETS = @json($facets ?? null);</script>
 <script src="{{ asset('js/search-core.js') }}" defer></script>
 <script src="{{ asset('js/search.js') }}" defer></script>
 @endpush

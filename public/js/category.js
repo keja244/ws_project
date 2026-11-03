@@ -1,7 +1,7 @@
 /* Halaman "See more" per kategori home: /category/{slug} */
 (() => {
     'use strict';
-    const { $, CATEGORIES, cardHTML, renderPager, getPage, setParams } = window.ITV;
+    const { $, CATEGORIES, normalize, cardHTML, renderPager, getPage, setParams } = window.ITV;
 
     const PER_PAGE = 21;                                  
     const cat = CATEGORIES.find((c) => c.slug === window.ITV_CATEGORY);
@@ -14,19 +14,38 @@
         return;
     }
 
-    const items = cat.get();
     title.textContent = cat.title;
     document.title = `${cat.title} — ITV`;
     let page = getPage();
+    let seq = 0;                                          // abaikan respons lama kalau halaman cepat berganti
 
-    const render = (scroll) => {
-        const total = items.length;
-        const pages = Math.max(1, Math.ceil(total / PER_PAGE));
-        page = Math.min(Math.max(page, 1), pages);
+    // Isi kategori dihitung di SPARQL (ShowController::categoryShows), bukan dari cat.get()
+    const render = async (scroll) => {
+        const mine = ++seq;
+        status.textContent = 'Loading…';
+
+        let data;
+        try {
+            const res = await fetch(`/api/category/${encodeURIComponent(cat.slug)}?page=${page}&per=${PER_PAGE}`, { headers: { Accept: 'application/json' } });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            data = await res.json();
+        } catch (err) {
+            if (mine !== seq) return;
+            list.innerHTML = '<p class="results__empty">Could not load this category. Please try again.</p>';
+            status.textContent = '';
+            pager.hidden = true;
+            return;
+        }
+        if (mine !== seq) return;
+
+        const items = data.shows.map(normalize);
+        const total = data.total;
+        const pages = data.pages;
+        page = data.page;
         const from = (page - 1) * PER_PAGE;
 
         list.innerHTML = total
-            ? items.slice(from, from + PER_PAGE).map(cardHTML).join('')
+            ? items.map(cardHTML).join('')
             : '<p class="results__empty">No shows in this category yet.</p>';
         status.textContent = total ? `${(from + 1).toLocaleString()}–${Math.min(from + PER_PAGE, total).toLocaleString()} of ${total.toLocaleString()} shows` : '';
         renderPager(pager, {
