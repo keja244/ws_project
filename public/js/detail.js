@@ -23,6 +23,9 @@
         actor: 'Bryan Cranston, Aaron Paul, Anna Gunn, Dean Norris, RJ Mitte',
         description: "A chemistry teacher diagnosed with inoperable lung cancer turns to manufacturing and selling methamphetamine with a former student to secure his family's future.",
         award: 'Won 16 Primetime Emmys. 172 wins & 269 nominations total',
+        winCount: 172,
+        nominationCount: 269,
+        awardResults: [{ name: 'Primetime Emmy', won: 16, nominated: 0 }],
         countryOfOrigin: 'United States',
         inLanguage: 'English, Spanish',
         spokenLanguage: ['English', 'German', 'Spanish'],
@@ -46,19 +49,26 @@
     /*  URL halaman lain */
     const GENRE_URL = window.ITV_GENRE_URL || '/genre/';
     const PLATFORM_URL = window.ITV_PLATFORM_URL || '/platform/';
-    const KEYWORD_URL = window.ITV_KEYWORD_URL || '/keyword';
+    const KEYWORD_URL = window.ITV_KEYWORD_URL || '/keyword/';
     const PERSON_URL = window.ITV_PERSON_URL || '/person/';
     const TOP_RATED_URL = window.ITV_TOP_RATED_URL || '/top-rated';
     const COMPANY_URL = window.ITV_COMPANY_URL || '/company/';
+    const COUNTRY_URL = window.ITV_COUNTRY_URL || '/country/';
+    const LANGUAGE_URL = window.ITV_LANGUAGE_URL || '/language/';
 
-    // actor / author / productionCompany / genre / platform dari server: [{slug, name}]. String biasa (data contoh) tetap diterima, tanpa link.
+    // actor / author / productionCompany / genre / platform / keywords / countryOfOrigin / spokenLanguage dari server: [{slug, name}]. String biasa (data contoh) tetap diterima, tanpa link.
     const entities = (v) => (Array.isArray(v) ? v : list(v))
         .map((p) => (typeof p === 'string'
             ? { slug: '', name: p.trim() }
             : { slug: String(p.slug || ''), name: String(p.name || '').trim() }))
         .filter((p) => p.name);
 
-    // cast / creator / company -> chip yang membuka {base}{slug} (/person/{slug}, /company/{slug})
+    // satu entitas -> teks biasa, atau link {base}{slug} kalau punya slug (negara & bahasa)
+    const entityLink = (p, base) => p.slug
+        ? `<a href="${base}${encodeURIComponent(p.slug)}">${esc(p.name)}</a>`
+        : esc(p.name);
+
+    // cast / creator / company / keyword -> chip yang membuka {base}{slug} (/person/{slug}, /company/{slug}, /keyword/{slug})
     const entityChips = (items, base) => `<div class="chips chips--sm">${items.map((p) => p.slug
         ? `<a class="chip chip--tag" href="${base}${encodeURIComponent(p.slug)}">${esc(p.name)}</a>`
         : `<span class="chip chip--tag">${esc(p.name)}</span>`).join('')}</div>`;
@@ -81,10 +91,10 @@
     const best = parseFloat(r.bestRating) || 10;
     const rating = parseFloat(r.aggregateRating) || 0;
 
-    // Ended / Canceled = merah, Returning Series = hijau, selain itu warna biasa
+    // Ended / Canceled = merah, Returning Series = hijau
     const statusClass = /returning/i.test(status) ? 'st-live' : finished ? 'st-end' : '';
 
-    /*  Link eksternal (IMDb sudah ada tombolnya di atas)  */
+    /*  Link eksternal  */
     const imdbUrl = r.uri || `https://www.imdb.com/title/${r.imdbId || r.id}/`;
 
     // Trailer (YouTube), backdrop (TMDB) & judul asli
@@ -92,6 +102,7 @@
     const backdrop = /^https:\/\/image\.tmdb\.org\//i.test(r.thumbnailUrl || '') ? r.thumbnailUrl : '';
     const altName = r.alternateName && r.alternateName !== r.name ? r.alternateName : '';
     const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+
     const rawLinks = list(r.links);
     const find = (re) => rawLinks.find((u) => re.test(u));
     const tmdbUrl = find(/themoviedb\.org/i) || (r.tmdbId ? `https://www.themoviedb.org/tv/${r.tmdbId}` : '');
@@ -108,31 +119,23 @@
     ].filter(([, u]) => u);
 
     /*  Series Info  */
-    const spoken = list(r.spokenLanguage);
+    const spoken = entities(r.spokenLanguage);
     const infoRows = [
         ['Status', status && `<span class="st ${statusClass}">${esc(status)}</span>`],
         ['Episodes', episodes && `${fmt(episodes)} Episode${episodes > 1 ? 's' : ''}`],
         ['Content Rating', r.contentRating && esc(r.contentRating)],
-        ['Spoken Languages', spoken.length && spoken.map(esc).join(', ')],
+        ['Spoken Languages', spoken.length && spoken.map((l) => entityLink(l, LANGUAGE_URL)).join(', ')],
         ['Seasons', seasons && `${seasons} Season${seasons > 1 ? 's' : ''}`],
         ['Runtime', minutes && `${minutes} Minute${minutes > 1 ? 's' : ''} / episode`],
     ].filter(([, v]) => v);
 
     /*  Awards & Recognition  */
     const award = r.award || '';
-    const winsTotal = num((award.match(/(\d+)\s+wins?/i) || [])[1]);
-    const nomsTotal = num((award.match(/(\d+)\s+nominations?/i) || [])[1]);
-    const AWARD_DEFS = [
-        ['Primetime Emmy', 'Primetime Emmys?'],
-        ['Oscar', 'Oscars?'],
-        ['Golden Globe', 'Golden Globes?'],
-        ['BAFTA', 'BAFTA(?: Awards?)?'],
-    ];
-    const featured = AWARD_DEFS.map(([label, pat]) => {
-        const w = award.match(new RegExp(`Won\\s+(\\d+)\\s+${pat}`, 'i'));
-        const n = award.match(new RegExp(`Nominated for\\s+(\\d+)\\s+${pat}`, 'i'));
-        return (w || n) ? { label, won: w ? num(w[1]) : 0, nom: n ? num(n[1]) : 0 } : null;
-    }).filter(Boolean);
+    const winsTotal = num(r.winCount);
+    const nomsTotal = num(r.nominationCount);
+    const featured = (Array.isArray(r.awardResults) ? r.awardResults : [])
+        .map((a) => ({ label: String(a.name || ''), won: num(a.won), nom: num(a.nominated) }))
+        .filter((a) => a.label && (a.won || a.nom));
 
     const sumAwards = winsTotal + nomsTotal;
     const winRate = sumAwards ? Math.round((winsTotal / sumAwards) * 100) : 0;
@@ -158,19 +161,20 @@
     const cast = entities(r.actor);
     const creators = entities(r.author);
     const companies = entities(r.productionCompany);
-    const keywords = list(r.keywords);
+    const keywords = entities(r.keywords);
     const platforms = entities(r.platform);
 
     // baris meta di header
-    const metaParts = [years, ...list(r.countryOfOrigin).slice(0, 1)].filter(Boolean);
+    const country = entities(r.countryOfOrigin)[0];
+    const metaParts = [years && esc(years), country && entityLink(country, COUNTRY_URL)].filter(Boolean);
 
     // Similar recommendation: 12 series yang sudah dihitung server
     const similar = ITV.SHOWS && !ITV.USING_PLACEHOLDER ? ITV.SHOWS : [];
 
-        document.getElementById('detail').innerHTML = `
-            ${backdrop ? `<div class="detail__backdrop" role="img" aria-label="Backdrop of ${esc(r.name)}"
-                style="background-image:linear-gradient(to top,rgba(0,0,0,.6),rgba(0,0,0,0) 65%),url('${esc(backdrop)}')"></div>` : ''}
-            <div class="detail__top">
+    document.getElementById('detail').innerHTML = `
+        ${backdrop ? `<div class="detail__backdrop" role="img" aria-label="Backdrop of ${esc(r.name)}"
+            style="background-image:linear-gradient(to top,rgba(0,0,0,.6),rgba(0,0,0,0) 65%),url('${esc(backdrop)}')"></div>` : ''}
+        <div class="detail__top">
             <div class="detail__poster">
                 ${r.image
                     ? `<img src="${esc(r.image)}" alt="Poster of ${esc(r.name)}" referrerpolicy="no-referrer" onerror="this.parentNode.innerHTML='<div class=fallback>${esc(r.name)}</div>'">`
@@ -187,14 +191,14 @@
             <div class="detail__main">
                 <div class="detail__titlerow">
                     <h1 class="detail__title">${esc(r.name)}</h1>
-                        <div class="detail__btns">
-                            ${trailerUrl ? `<a class="imdb-btn trailer-btn" href="${esc(trailerUrl)}" target="_blank" rel="noopener noreferrer">${PLAY} Watch Trailer</a>` : ''}
-                            <a class="imdb-btn" href="${esc(imdbUrl)}" target="_blank" rel="noopener noreferrer">View on IMDb ${EXT}</a>
-                        </div>
+                    <div class="detail__btns">
+                        ${trailerUrl ? `<a class="imdb-btn trailer-btn" href="${esc(trailerUrl)}" target="_blank" rel="noopener noreferrer">${PLAY} Watch Trailer</a>` : ''}
+                        <a class="imdb-btn" href="${esc(imdbUrl)}" target="_blank" rel="noopener noreferrer">View on IMDb ${EXT}</a>
+                    </div>
                 </div>
                 ${r.slogan ? `<p class="detail__slogan">“${esc(r.slogan)}”</p>` : ''}
                 ${altName ? `<p class="detail__alt">Original title: ${esc(altName)}</p>` : ''}
-                ${metaParts.length ? `<p class="detail__meta">${metaParts.map(esc).join(sep)}</p>` : ''}
+                ${metaParts.length ? `<p class="detail__meta">${metaParts.join(sep)}</p>` : ''}
 
                 <div class="detail__scorerow">
                     <div>
@@ -222,9 +226,7 @@
                     ${creators.length ? `<section><h2>Created by</h2>${entityChips(creators, PERSON_URL)}</section>` : ''}
                     ${cast.length ? `<section><h2>Main Cast</h2>${entityChips(cast, PERSON_URL)}</section>` : ''}
                     ${companies.length ? `<section><h2>Production Companies</h2>${entityChips(companies, COMPANY_URL)}</section>` : ''}
-                    ${keywords.length ? `<section><h2>Keywords</h2>
-                        <div class="chips chips--sm">${keywords.map((k) => `<a class="chip chip--tag" href="${KEYWORD_URL}?k=${encodeURIComponent(k)}">${esc(k)}</a>`).join('')}</div>
-                    </section>` : ''}
+                    ${keywords.length ? `<section><h2>Keywords</h2>${entityChips(keywords, KEYWORD_URL)}</section>` : ''}
                     ${platforms.length ? `<section class="platforms">
                         <h2>Platform</h2>
                         <div class="chips">${platforms.map((p) => p.slug
@@ -349,7 +351,6 @@
             const t = new Date(d);
             return isNaN(t) ? '' : t.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
         };
-        // Markdown ringan: **tebal**, __tebal__, *miring*, _miring_ (teks di-escape dulu, jadi aman)
         const md = (s) => esc(s)
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/__(.+?)__/g, '<strong>$1</strong>')
@@ -378,7 +379,6 @@
             </article>`;
         };
 
-        // tombol "Show more" hanya untuk review yang benar-benar terpotong
         const fitToggles = () => {
             rvList.querySelectorAll('.rv:not([data-checked])').forEach((a) => {
                 a.dataset.checked = '1';
@@ -394,7 +394,6 @@
             });
         };
 
-        // 1 2 3 ... 9 10 (dengan titik-titik kalau halamannya banyak)
         const pageItems = (cur, total) => {
             if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
             const set = [...new Set([1, total, cur - 1, cur, cur + 1])]

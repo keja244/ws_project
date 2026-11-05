@@ -228,3 +228,7 @@ a.chip:hover, a.chip:focus-visible { transform: translateY(-2px); background: #2
 .trailer-btn { background: #ff2d4d; color: #fff; }
 .trailer-btn:hover, .trailer-btn:focus-visible { background: #ff5470; }
 .detail__alt { margin-top: 6px; font-size: 13px; font-weight: 500; color: #9a9fb8; }
+/* Link negara & bahasa */
+.detail__meta a, .info dd a { color: inherit; text-decoration: none; transition: color .2s; }
+.detail__meta a:hover, .detail__meta a:focus-visible,
+.info dd a:hover, .info dd a:focus-visible { color: var(--lavender); text-decoration: underline; outline: none; }

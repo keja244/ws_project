@@ -18,13 +18,17 @@ Route::get('/platform/{slug?}', [ShowController::class, 'platform'])->where('slu
 
 Route::get('/api/platform/{slug}', [ShowController::class, 'platformShows'])->where('slug', '[a-z0-9-]+');
 
-Route::get('/keyword', [ShowController::class, 'keyword'])->middleware('throttle:60,1');
+Route::get('/keyword/{slug?}', [ShowController::class, 'keyword']);
 
 Route::get('/company/{slug}', [ShowController::class, 'company'])->where('slug', '[a-z0-9-]+');
 
 Route::get('/person/{slug}', [ShowController::class, 'person'])->where('slug', '[a-z0-9-]+');
 
 Route::get('/top-rated', [ShowController::class, 'topRated']);
+
+Route::get('/country/{slug}', [ShowController::class, 'country']);
+
+Route::get('/language/{slug}', [ShowController::class, 'language']);
 
 Route::get('/category/{slug}', [ShowController::class, 'category'])->where('slug', '[a-z-]+');
 
