@@ -33,5 +33,6 @@
 @endsection
 
 @push('scripts')
+<script>window.ITV_HOME = @json($rows ?? []);</script>
 <script src="{{ asset('js/home.js') }}" defer></script>
 @endpush

@@ -17,5 +17,6 @@
 @endsection
 
 @push('scripts')
+<script>window.ITV_TOP_RATED = @json($initial);</script>
 <script src="{{ asset('js/top-rated.js') }}" defer></script>
 @endpush

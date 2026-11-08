@@ -65,5 +65,6 @@
     window.ITV_PLATFORMS = @json($tiles);
     window.ITV_PLATFORM = @json($initial);
 </script>
+<script src="{{ asset('js/browse.js') }}" defer></script>
 <script src="{{ asset('js/platform.js') }}" defer></script>
 @endpush

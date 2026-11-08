@@ -24,7 +24,9 @@ Route::get('/company/{slug}', [ShowController::class, 'company'])->where('slug',
 
 Route::get('/person/{slug}', [ShowController::class, 'person'])->where('slug', '[a-z0-9-]+');
 
-Route::get('/top-rated', [ShowController::class, 'topRated']);
+Route::get('/top-rated/{rank?}', [ShowController::class, 'topRated'])->whereNumber('rank');
+
+Route::get('/api/top-rated', [ShowController::class, 'topRatedShows'])->middleware('throttle:60,1');
 
 Route::get('/country/{slug}', [ShowController::class, 'country']);
 
@@ -39,7 +41,5 @@ Route::get('/api/reviews/{tmdbId}', [ReviewController::class, 'show'])->whereNum
 Route::post('/api/chat', [ShowController::class, 'chat'])->middleware('throttle:12,1');
 
 Route::post('/api/chat/feedback', [ShowController::class, 'chatFeedback'])->middleware('throttle:30,1');
-
-Route::get('/api/search', [ShowController::class, 'searchApi']);
 
 Route::get('/api/category/{slug}', [ShowController::class, 'categoryShows']);

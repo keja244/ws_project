@@ -206,7 +206,7 @@
                         <p class="detail__votes">${votes} votes<small>Based on IMDb users rating</small></p>
                     </div>
                     ${rank ? `
-                    <a class="rankbox" href="${TOP_RATED_URL}?id=${encodeURIComponent(r.id)}" title="Lihat di Top Rated">
+                    <a class="rankbox" href="${TOP_RATED_URL.replace(/\/?$/, '/')}${rank}" title="Lihat di Top Rated">
                         <span>RANK</span>
                         <strong>#${fmt(rank)}</strong>
                     </a>` : ''}
