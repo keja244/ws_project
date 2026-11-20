@@ -1,0 +1,59 @@
+@prefix : <http://series-tv.com/ontology/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+:Genre a owl:Class ;
+    rdfs:label "Genre Serial TV" .
+
+:Horror a :Genre ;
+    skos:prefLabel "Horror" ;
+    skos:altLabel "Horor", "Seram", "Menakutkan" ;
+    skos:related :Thriller .
+
+:Thriller a :Genre ;
+    skos:prefLabel "Thriller" ;
+    skos:altLabel "Tegang", "Mencekam", "Suspense" ;
+    skos:related :Mystery .
+
+:Mystery a :Genre ;
+    skos:prefLabel "Mystery" ;
+    skos:altLabel "Misteri", "Teka-teki" ;
+    skos:related :Crime .
+
+:Crime a :Genre ;
+    skos:prefLabel "Crime" ;
+    skos:altLabel "Kriminal", "Kejahatan" ;
+    skos:related :Mystery .
+
+:Comedy a :Genre ;
+    skos:prefLabel "Comedy" ;
+    skos:altLabel "Komedi", "Lucu", "Humor" .
+
+:Drama a :Genre ;
+    skos:prefLabel "Drama" .
+
+:Action a :Genre ;
+    skos:prefLabel "Action" ;
+    skos:altLabel "Aksi" .
+
+:Romance a :Genre ;
+    skos:prefLabel "Romance" ;
+    skos:altLabel "Romansa", "Romantis" .
+
+:Fantasy a :Genre ;
+    skos:prefLabel "Fantasy" ;
+    skos:altLabel "Fantasi" .
+
+:Animation a :Genre ;
+    skos:prefLabel "Animation" ;
+    skos:altLabel "Animasi", "Kartun" .
+
+:SciFi a :Genre ;
+    skos:prefLabel "Science Fiction" ;
+    skos:altLabel "Sci-Fi", "Fiksi ilmiah" .
+
+:Documentary a :Genre ;
+    skos:prefLabel "Documentary" ;
+    skos:altLabel "Dokumenter" .

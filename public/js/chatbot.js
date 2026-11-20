@@ -212,7 +212,20 @@
                 pending.appendChild(note);
             }
             addResults(pending, data.shows, data.moreShows);
-            addQuickReplies(pending, Array.isArray(data.shows) && data.shows.length > 0, data.quickReplies);
+
+        if (Array.isArray(data.relatedShows) && data.relatedShows.length > 0) {
+            const relatedSection = document.createElement('div');
+            relatedSection.className = 'chatbot__related';
+
+            const heading = document.createElement('strong');
+            heading.textContent = `Genre terkait: ${data.relatedGenres.join(', ')}`;
+
+            relatedSection.appendChild(heading);
+            addResults(relatedSection, data.relatedShows);
+            pending.appendChild(relatedSection);
+        }
+
+        addQuickReplies(pending, Array.isArray(data.shows) && data.shows.length > 0, data.quickReplies);
             addFeedback(pending, data.responseId);
         } catch (error) {
             pending.classList.add('chatbot__bubble--error');

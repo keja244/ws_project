@@ -4,6 +4,10 @@ namespace App\Services;
 
 class ChatbotService
 {
+    public function __construct(
+        private SparqlService $sparql
+    ) {}
+
     private const ASIAN_COUNTRIES = [
         'china', 'hong kong', 'india', 'indonesia', 'japan', 'malaysia',
         'philippines', 'singapore', 'south korea', 'taiwan', 'thailand', 'vietnam',
@@ -449,10 +453,92 @@ class ChatbotService
             ];
         }
 
-        $filters = compact('genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'year', 'yearInclusive', 'yearMax', 'yearMaxInclusive', 'seasonRange', 'episodeMax', 'endedOnly', 'westernOnly', 'shortEpisodes', 'durationMax', 'familyFriendly');
-        $filters['excludeTitles'] = array_map(fn (array $show) => (string) ($show['id'] ?? ''), $excludedTitles);
-        $matches = array_values(array_filter($shows, fn (array $show) => $this->matchesFilters($show, $filters)));
 
+        $filters = compact('genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'year', 'yearInclusive', 'yearMax', 'yearMaxInclusive', 'seasonRange', 'episodeMax', 'endedOnly', 'westernOnly', 'shortEpisodes', 'durationMax', 'familyFriendly');
+
+        $filters['excludeTitles'] = array_map(
+            fn (array $show) => (string) ($show['id'] ?? ''),
+            $excludedTitles
+        );
+
+
+        $relatedMatches = [];
+        $relatedGenres = [];
+
+        $matches = array_values(array_filter(
+        $shows,
+        fn (array $show) => $this->matchesFilters($show, $filters)
+    ));
+
+        if ($genres) {
+            $semanticResults = $this->searchSemanticGenre($genres, $genreMode);
+            $relatedGenres = $this->getRelatedSemanticGenres($genres);
+
+            if ($excludeGenres) {
+            $relatedGenres = array_values(array_filter(
+                $relatedGenres,
+                fn (string $genre) => ! in_array(
+                    mb_strtolower($genre),
+                    array_map('mb_strtolower', $excludeGenres),
+                    true
+                )
+            ));
+        }
+
+            $semanticIds = array_map(
+            fn (array $row) => trim($row['id'] ?? ''),
+            $semanticResults
+        );
+
+        $genreShows = array_values(array_filter(
+            $shows,
+            fn (array $show) => in_array(
+                trim((string) ($show['id'] ?? '')),
+                $semanticIds,
+                true
+            )
+        ));
+
+            $filtersWithoutGenres = $filters;
+            $filtersWithoutGenres['genres'] = [];
+
+            $matches = array_values(array_filter(
+                $genreShows,
+                fn (array $show) => $this->matchesFilters($show, $filtersWithoutGenres)
+            ));
+            $relatedMatches = [];
+
+            if ($relatedGenres) {
+                $relatedResults = $this->searchSemanticGenre($relatedGenres, 'or');
+
+                $relatedIds = array_map(
+                fn (array $row) => trim($row['id'] ?? ''),
+                $relatedResults
+            );
+                $mainIds = array_map(
+                    fn (array $show) => (string) ($show['id'] ?? ''),
+                    $matches
+                );
+
+                $relatedShows = array_values(array_filter(
+                $shows,
+                fn (array $show) =>
+                    in_array(
+                        trim((string) ($show['id'] ?? '')),
+                        $relatedIds,
+                        true
+                    )
+                    && ! in_array((string) ($show['id'] ?? ''), $mainIds, true)
+            ));
+
+                $relatedMatches = array_values(array_filter(
+                    $relatedShows,
+                    fn (array $show) => $this->matchesFilters($show, $filtersWithoutGenres)
+                ));
+
+                $this->sortShows($relatedMatches, $sort, $moods);
+            }
+        }
         if ($title && ! $similarIntent) {
             $matches = array_values(array_filter($matches, fn (array $show) => ($show['id'] ?? null) === ($title['id'] ?? null)));
         }
@@ -569,13 +655,23 @@ class ChatbotService
                 : $this->reasonFor($show, $criteria, $similarIntent ? $title : null, $moods))
         );
 
+        $toRelatedCard = fn (array $show): array => $this->card(
+        $show,
+        'Direkomendasikan karena genre terkait: '.implode(', ', $relatedGenres)
+    );
+
         return array_merge([
-            'answer' => $answer,
-            'shows' => array_map($toCard, array_slice($results, 0, 4)),
-            'moreShows' => array_map($toCard, array_slice($results, 4, 5)),
-            'searchUrl' => $searchUrl,
-            'state' => $state,
-        ], $extras);
+        'answer' => $answer,
+        'shows' => array_map($toCard, array_slice($results, 0, 4)),
+        'moreShows' => array_map($toCard, array_slice($results, 4, 5)),
+        'relatedGenres' => $relatedGenres,
+        'relatedShows' => array_map(
+            $toRelatedCard,
+            array_slice($relatedMatches, 0, 5)
+        ),
+        'searchUrl' => $searchUrl,
+        'state' => $state,
+    ], $extras);
     }
 
     private function isPromptInjection(string $query): bool
@@ -1292,6 +1388,16 @@ class ChatbotService
             'bikin tegang' => 'thriller', 'yang lucu' => 'comedy',
         ];
         $found = [];
+        $ontologyAliases = $this->getOntologyGenreAliases();
+
+        foreach ($ontologyAliases as $alias => $genre) {
+            if (preg_match('/(?<![\pL\pN])'.preg_quote($alias, '/').'(?![\pL\pN])/u', $query)) {
+                $genreKey = mb_strtolower($genre);
+                $matchedGenre = $available[$genreKey] ?? $genre;
+
+                $found[mb_strtolower($matchedGenre)] = $matchedGenre;
+            }
+        }
         foreach ($aliases as $alias => $genre) {
             if (preg_match('/(?<![\pL\pN])'.preg_quote($alias, '/').'(?![\pL\pN])/u', $query)) {
                 $found[mb_strtolower($available[$genre] ?? ucfirst($genre))] = $available[$genre] ?? ucfirst($genre);
@@ -1906,10 +2012,17 @@ class ChatbotService
         ];
         $found = [];
         foreach ($moods as $label => $terms) {
-            if (mb_strpos($query, $label) !== false) {
-                $found[$label] = $terms;
-            }
+        if (
+            $label === 'thriller'
+            && preg_match('/\b(?:jangan|tanpa|hindari|kecuali)\s+(?:genre\s+)?thriller\b/u', $query)
+        ) {
+            continue;
         }
+
+        if (mb_strpos($query, $label) !== false) {
+            $found[$label] = $terms;
+        }
+    }
 
         return $found;
     }
@@ -2037,25 +2150,171 @@ class ChatbotService
         ];
     }
 
-    private function rankSimilar(array $title, array $matches, array $moods): array
-    {
+    
+private function rankSimilar(array $title, array $matches, array $moods): array
+{
+    $id = trim((string) ($title['id'] ?? ''));
+
+    if (! preg_match('/^tt\d+$/', $id)) {
+        return $matches;
+    }
+
+    $uri = 'http://example.org/tvseries/series/'.$id;
+
+    $query = '
+        PREFIX schema: <https://schema.org/>
+        PREFIX : <http://example.org/tvseries/vocab#>
+
+        SELECT ?id
+            (
+                2 * COALESCE(?genreCount, 0) +
+                5 * COALESCE(?actorCount, 0) +
+                COALESCE(?countryCount, 0) +
+                COALESCE(?platformCount, 0)
+                AS ?score
+            )
+        WHERE {
+            ?series a schema:TVSeries .
+
+            FILTER(?series != <'.$uri.'>)
+
+            BIND(
+                REPLACE(STR(?series), "^.*/series/", "")
+                AS ?id
+            )
+
+            OPTIONAL {
+                SELECT ?series (COUNT(DISTINCT ?g) AS ?genreCount)
+                WHERE {
+                    <'.$uri.'> schema:genre ?g .
+                    ?series schema:genre ?g .
+                    FILTER(?series != <'.$uri.'>)
+                }
+                GROUP BY ?series
+            }
+
+            OPTIONAL {
+                SELECT ?series (COUNT(DISTINCT ?a) AS ?actorCount)
+                WHERE {
+                    <'.$uri.'> schema:actor ?a .
+                    ?series schema:actor ?a .
+                    FILTER(?series != <'.$uri.'>)
+                }
+                GROUP BY ?series
+            }
+
+            OPTIONAL {
+                SELECT ?series (COUNT(DISTINCT ?c) AS ?countryCount)
+                WHERE {
+                    <'.$uri.'> schema:countryOfOrigin ?c .
+                    ?series schema:countryOfOrigin ?c .
+                    FILTER(?series != <'.$uri.'>)
+                }
+                GROUP BY ?series
+            }
+
+            OPTIONAL {
+                SELECT ?series (COUNT(DISTINCT ?p) AS ?platformCount)
+                WHERE {
+                    <'.$uri.'> :platform ?p .
+                    ?series :platform ?p .
+                    FILTER(?series != <'.$uri.'>)
+                }
+                GROUP BY ?series
+            }
+
+            FILTER(
+                COALESCE(?genreCount, 0) +
+                COALESCE(?actorCount, 0) +
+                COALESCE(?countryCount, 0) +
+                COALESCE(?platformCount, 0) > 0
+            )
+        }
+        ORDER BY DESC(?score)
+    ';
+
+    try {
+        $rows = $this->sparql->query($query);
+
+        $semanticScores = [];
+
+        foreach ($rows as $row) {
+            $candidateId = trim((string) ($row['id'] ?? ''));
+
+            if ($candidateId !== '') {
+                $semanticScores[$candidateId] = (float) ($row['score'] ?? 0);
+            }
+        }
+
+        if (empty($semanticScores)) {
+            throw new \RuntimeException('Fuseki tidak mengembalikan skor kemiripan.');
+        }
+
+        usort($matches, function (array $a, array $b) use ($semanticScores, $moods): int {
+            $score = function (array $show) use ($semanticScores, $moods): float {
+                $showId = trim((string) ($show['id'] ?? ''));
+
+                return ($semanticScores[$showId] ?? 0)
+                    + $this->moodScore($show, $moods);
+            };
+
+            return ($score($b) <=> $score($a))
+                ?: ((float) ($b['aggregateRating'] ?? 0) <=> (float) ($a['aggregateRating'] ?? 0));
+        });
+
+        return $matches;
+    
+    } catch (\Throwable $e) {
         $anchorGenres = array_map('mb_strtolower', $this->list($title['genre'] ?? ''));
         $anchorCast = array_map('mb_strtolower', $this->list($title['actor'] ?? ''));
-        usort($matches, function (array $a, array $b) use ($anchorGenres, $anchorCast, $moods): int {
-            $score = fn (array $show) => count(array_intersect($anchorGenres, array_map('mb_strtolower', $this->list($show['genre'] ?? '')))) * 2
-                + count(array_intersect($anchorCast, array_map('mb_strtolower', $this->list($show['actor'] ?? '')))) * 3
-                + $this->moodScore($show, $moods);
+        $anchorCountries = array_map('mb_strtolower', $this->list($title['countryOfOrigin'] ?? ''));
+        $anchorPlatforms = array_map('mb_strtolower', $this->list($title['platform'] ?? ''));
 
-            return ($score($b) <=> $score($a)) ?: ((float) ($b['aggregateRating'] ?? 0) <=> (float) ($a['aggregateRating'] ?? 0));
+        usort($matches, function (array $a, array $b) use (
+            $anchorGenres,
+            $anchorCast,
+            $anchorCountries,
+            $anchorPlatforms,
+            $moods
+        ): int {
+            $score = function (array $show) use (
+                $anchorGenres,
+                $anchorCast,
+                $anchorCountries,
+                $anchorPlatforms,
+                $moods
+            ): float {
+                return count(array_intersect(
+                    $anchorGenres,
+                    array_map('mb_strtolower', $this->list($show['genre'] ?? ''))
+                )) * 2
+                + count(array_intersect(
+                    $anchorCast,
+                    array_map('mb_strtolower', $this->list($show['actor'] ?? ''))
+                )) * 5
+                + count(array_intersect(
+                    $anchorCountries,
+                    array_map('mb_strtolower', $this->list($show['countryOfOrigin'] ?? ''))
+                ))
+                + count(array_intersect(
+                    $anchorPlatforms,
+                    array_map('mb_strtolower', $this->list($show['platform'] ?? ''))
+                ))
+                + $this->moodScore($show, $moods);
+            };
+
+            return ($score($b) <=> $score($a))
+                ?: ((float) ($b['aggregateRating'] ?? 0) <=> (float) ($a['aggregateRating'] ?? 0));
         });
 
         return $matches;
     }
+}
 
     private function recommendationAnswer(array $results, array $criteria, ?array $title): string
     {
         if ($title && $results) {
-            return "Kalau suka {$title['name']}, coba serial berikut. Aku mengurutkannya berdasarkan kemiripan genre/pemeran dan rating.";
+            return "Kalau suka {$title['name']}, coba serial berikut. Aku mengurutkannya berdasarkan kemiripan genre, pemeran, negara asal, dan platform.";
         }
         $reason = $criteria ? 'Aku pilih yang cocok dengan '.implode(', ', $criteria) : 'Berikut pilihan dengan rating terbaik di katalog';
 
@@ -2220,4 +2479,135 @@ class ChatbotService
 
         return (bool) array_intersect($left, $right);
     }
+    
+private function searchSemanticGenre(array $genres, string $mode = 'and'): array
+{
+    if (empty($genres)) {
+        return [];
+    }
+
+    $genreFilters = [];
+
+    foreach ($genres as $index => $genre) {
+        $genre = SparqlService::esc(mb_strtolower(trim($genre)));
+
+        $genreFilters[] = '
+            EXISTS {
+                ?series schema:genre ?genre'.$index.' .
+                FILTER(
+                    CONTAINS(
+                        LCASE(STR(?genre'.$index.')),
+                        "'.$genre.'"
+                    )
+                )
+            }
+        ';
+    }
+
+    $filter = implode(
+        $mode === 'or' ? ' || ' : ' && ',
+        $genreFilters
+    );
+
+    $query = '
+        PREFIX schema: <https://schema.org/>
+
+        SELECT DISTINCT ?id ?name
+        WHERE {
+            ?series a schema:TVSeries ;
+                    schema:name ?name .
+
+            BIND(
+                REPLACE(STR(?series), "^.*/series/", "")
+                AS ?id
+            )
+
+            FILTER('.$filter.')
+        }
+    ';
+
+    return $this->sparql->query($query);
+}
+
+
+private function getRelatedSemanticGenres(array $genres): array
+{
+    if (empty($genres)) {
+        return [];
+    }
+
+    $genreValues = [];
+
+    foreach ($genres as $genre) {
+        $genre = SparqlService::esc(mb_strtolower(trim($genre)));
+
+        $genreValues[] = '"'.$genre.'"';
+    }
+
+    $values = implode(', ', $genreValues);
+
+    $query = '
+        PREFIX : <http://series-tv.com/ontology/>
+        PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+        SELECT DISTINCT ?relatedLabel
+        WHERE {
+            ?genre a :Genre ;
+                   skos:prefLabel ?label ;
+                   skos:related ?related .
+
+            ?related skos:prefLabel ?relatedLabel .
+
+            FILTER(LCASE(STR(?label)) IN ('.$values.'))
+        }
+    ';
+
+    try {
+        $results = $this->sparql->query($query);
+    } catch (\Throwable $e) {
+        return [];
+    }
+
+    return array_values(array_unique(array_filter(
+        array_map(
+            fn (array $row) => trim($row['relatedLabel'] ?? ''),
+            $results
+        )
+    )));
+}
+
+private function getOntologyGenreAliases(): array
+{
+    $query = '
+        PREFIX : <http://series-tv.com/ontology/>
+        PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+        SELECT DISTINCT ?label ?alias
+        WHERE {
+            ?genre a :Genre ;
+                   skos:prefLabel ?label ;
+                   skos:altLabel ?alias .
+        }
+    ';
+
+    try {
+        $results = $this->sparql->query($query);
+    } catch (\Throwable $e) {
+        return [];
+    }
+
+    $aliases = [];
+
+    foreach ($results as $row) {
+        $alias = trim($row['alias'] ?? '');
+        $label = trim($row['label'] ?? '');
+
+        if ($alias !== '' && $label !== '') {
+            $aliases[mb_strtolower($alias)] = $label;
+        }
+    }
+
+    return $aliases;
+}
+
 }
