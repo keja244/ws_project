@@ -37,15 +37,20 @@ class ShowController extends Controller
     private const LANGUAGE_NS = 'http://example.org/tvseries/language/';
 
     // Prefix SPARQL yang dipakai semua query (prefix yang tidak terpakai tidak mengganggu)
+    //
+    // KETERGANTUNGAN TRIPLESTORE: prefix afn: dan fungsi afn:sqrt() (dipakai similarTo())
+    // adalah ekstensi Apache Jena/Fuseki. Kalau triplestore diganti (Virtuoso, GraphDB, dst.),
+    // similarTo() harus diubah, karena SPARQL 1.1 standar tidak punya fungsi akar kuadrat.
     private const PREFIXES = '
         PREFIX schema: <https://schema.org/>
         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+        PREFIX owl: <http://www.w3.org/2002/07/owl#>
         PREFIX ex: <http://example.org/tvseries/vocab#>
         PREFIX afn: <http://jena.apache.org/ARQ/function#>
     ';
 
-    // Slug/id dihitung di graf: ".../series/tt0043208" -> "tt0043208"
+    // Slug/id dihitung di graf (REGEX): ".../series/tt0043208" -> "tt0043208"
     private const ID = '(REPLACE(STR(?s), "^.*/", "") AS ?id)';
 
     // Urutan standar
@@ -83,11 +88,15 @@ class ShowController extends Controller
     ];
 
     // Inti per series. ?rank = ex:rank (rank Bayesian yang sudah tersimpan di graf)
+    // Tahun mulai (?y0) diambil dengan REGEX di BAWAH OPTIONAL: 4 digit pertama dari ex. "2008" / "2008-01-20".
+    // IF(BOUND(?sd) && REGEX(...)) menjaga series tanpa startDate (atau yang bukan tahun) tetap ikut:
+    // ?y0 kosong, series tidak terbuang.
     private const CORE = '
         { SELECT ?s (SAMPLE(?n) AS ?name) (MIN(?y0) AS ?yr) (MAX(?ns0) AS ?ns) (SAMPLE(?r0) AS ?rt) (SAMPLE(?v0) AS ?votes) (SAMPLE(?rk0) AS ?rank)
           WHERE {
             ?s a schema:TVSeries ; schema:name ?n .
-            OPTIONAL { ?s schema:startDate ?sd . BIND(xsd:integer(SUBSTR(STR(?sd), 1, 4)) AS ?y0) }
+            OPTIONAL { ?s schema:startDate ?sd . }
+            BIND(IF(BOUND(?sd) && REGEX(STR(?sd), "^[0-9]{4}", "i"), xsd:integer(REPLACE(STR(?sd), "^([0-9]{4}).*$", "$1")), ?tanpaTahun) AS ?y0)
             OPTIONAL { ?s schema:numberOfSeasons ?nsr . BIND(xsd:integer(?nsr) AS ?ns0) }
             OPTIONAL { ?s ex:rank ?rkr . BIND(xsd:integer(?rkr) AS ?rk0) }
             OPTIONAL {
@@ -103,17 +112,38 @@ class ShowController extends Controller
         OPTIONAL { ?s ex:winCount ?wins }
     ';
 
-    // Properti series yang dipakai halaman detail (nama lokal predikat)
+    // Properti series yang berelasi ke entitas lain (key = nama lokal predikat)
     private const LINKED_KEYS = ['actor', 'author', 'productionCompany', 'genre', 'platform', 'keywords', 'countryOfOrigin', 'spokenLanguage'];
-    private const DETAIL_KEYS = [
-        'name', 'description', 'image', 'award', 'contentRating', 'slogan',
-        'startDate', 'endDate', 'numberOfSeasons', 'numberOfEpisodes',
-        'status', 'tmdbId', 'tvdbId', 'wikidataId', 'imdbId',
-        'trailer', 'thumbnailUrl', 'alternateName',
-        'winCount', 'nominationCount',
-        'rank',                 // ex:rank (rank Bayesian yang tersimpan di graf)
-        'duration', 'sameAs', 'inLanguage',
+
+    // Pemetaan predikat -> key untuk halaman detail. Dipakai sebagai VALUES (?p ?key) di SPARQL,
+    // jadi predikat dicocokkan lewat IRI penuh (bisa memakai indeks), bukan lewat nama lokal.
+    // Isinya hanya predikat yang benar-benar ada di TTL.
+    private const PRED_MAP = [
+        // relasi ke entitas
+        ['schema:actor', 'actor'], ['schema:author', 'author'],
+        ['schema:productionCompany', 'productionCompany'], ['schema:genre', 'genre'],
+        ['ex:platform', 'platform'], ['schema:keywords', 'keywords'],
+        ['schema:countryOfOrigin', 'countryOfOrigin'], ['ex:spokenLanguage', 'spokenLanguage'],
+        // nilai langsung
+        ['schema:name', 'name'], ['schema:description', 'description'], ['schema:image', 'image'],
+        ['schema:award', 'award'], ['schema:contentRating', 'contentRating'], ['schema:slogan', 'slogan'],
+        ['schema:startDate', 'startDate'], ['schema:endDate', 'endDate'],
+        ['schema:numberOfSeasons', 'numberOfSeasons'], ['schema:numberOfEpisodes', 'numberOfEpisodes'],
+        ['ex:status', 'status'], ['ex:tmdbId', 'tmdbId'], ['ex:tvdbId', 'tvdbId'],
+        ['ex:wikidataId', 'wikidataId'], ['ex:imdbId', 'imdbId'],
+        ['schema:trailer', 'trailer'], ['schema:thumbnailUrl', 'thumbnailUrl'],
+        ['schema:alternateName', 'alternateName'],
+        ['ex:winCount', 'winCount'], ['ex:nominationCount', 'nominationCount'],
+        ['ex:rank', 'rank'],          // ex:rank (rank Bayesian yang tersimpan di graf)
+        ['schema:duration', 'duration'],
+        ['schema:sameAs', 'sameAs'], ['owl:sameAs', 'sameAs'],
+        ['schema:inLanguage', 'inLanguage'],
     ];
+
+    // Pemisah antar item dan antar bagian (slug / label) pada GROUP_CONCAT halaman detail.
+    // Karakter kontrol dipilih supaya tidak bentrok dengan isi teks (deskripsi, dll.).
+    private const ITEM_SEP = "\x1E";   // di SPARQL ditulis '\u001E'
+    private const PART_SEP = "\x1F";   // di SPARQL ditulis '\u001F'
 
     public function __construct(private SparqlService $sparql) {}
 
@@ -127,12 +157,21 @@ class ShowController extends Controller
         return $this->sparql->query(self::PREFIXES . $body);
     }
 
+    /**
+     * Kunci cache yang diturunkan dari TEKS QUERY (bukan nomor versi manual):
+     * query berubah -> hash berubah -> cache lama otomatis tidak terpakai lagi.
+     */
+    private static function qkey(string $name, string $query): string
+    {
+        return $name . '_' . md5(self::PREFIXES . $query);
+    }
+
     // "Comedy|Drama" -> ['Comedy', 'Drama']  (hanya untuk bentuk array di JSON / chatbot)
+    // Trim spasi, nilai kosong, dan duplikat sudah dibereskan di SPARQL (lihat agg()).
     private static function labels(?string $concat): array
     {
         if (!$concat) return [];
-        $parts = array_filter(array_map('trim', explode('|', $concat)), 'strlen');
-        return array_values(array_unique($parts));
+        return explode('|', $concat);
     }
 
     // Slug harus aman sebelum dipakai membentuk IRI
@@ -151,15 +190,39 @@ class ShowController extends Controller
     }
 
     /**
+     * Escape metakarakter REGEX pada teks bebas dari pengguna, supaya "a+b" atau "(x"
+     * dicocokkan apa adanya (bukan dianggap pola).
+     */
+    private static function reLit(string $s): string
+    {
+        return preg_replace('/[.\\\\+*?\[\]^$(){}|\-]/', '\\\\$0', $s) ?? $s;
+    }
+
+    /**
+     * Literal string SPARQL untuk dipakai sebagai pola REGEX():
+     *   $prefix / $suffix = potongan pola dari kode (mis. '^', '(^| )', '$'),
+     *                       HANYA boleh dari kode, tidak pernah dari input pengguna,
+     *   $s                = teks pengguna (di-escape lewat reLit()).
+     */
+    private static function rx(string $s, string $prefix = '', string $suffix = ''): string
+    {
+        return self::sparqlStr($prefix . self::reLit($s) . $suffix);
+    }
+
+    /**
      * Ekspresi SPARQL: durasi (ISO 8601 "PT1H30M" / "PT30M" atau teks "49 min") -> menit (integer).
      * $v = nama variabel SPARQL yang berisi durasi.
      */
+    
     private static function minutesExpr(string $v): string
     {
         $e = 'IF(REGEX({S}, "^PT[0-9]+[HM]"), '
-            . '(IF(REGEX({S}, "^PT[0-9]+H"), xsd:integer(REPLACE({S}, "^PT([0-9]+)H.*$", "$1")), 0) * 60 '
-            . '+ IF(REGEX({S}, "^PT([0-9]+H)?[0-9]+M"), xsd:integer(REPLACE({S}, "^PT(?:[0-9]+H)?([0-9]+)M.*$", "$1")), 0)), '
+            . '(IF(REGEX({S}, "^PT[0-9]+H"), '
+            . 'xsd:integer(REPLACE({S}, "^PT([0-9]+)H.*$", "$1")), 0) * 60 '
+            . '+ IF(REGEX({S}, "^PT([0-9]+H)?[0-9]+M"), '
+            . 'xsd:integer(REPLACE({S}, "^PT([0-9]+H)?([0-9]+)M.*$", "$2")), 0)), '
             . 'xsd:integer(REPLACE({S}, "^[^0-9]*([0-9]+).*$", "$1")))';
+
         return str_replace('{S}', "STR($v)", $e);
     }
 
@@ -172,6 +235,7 @@ class ShowController extends Controller
      *   $sep     : pemisah GROUP_CONCAT
      *   $raw     : true = nilai literal apa adanya (mis. award), false = rdfs:label entitas
      *   $lower   : huruf kecil (keywords)
+     * Spasi di tepi nilai dibuang dan nilai kosong disaring di SPARQL (REGEX), bukan di PHP.
      */
     private static function agg(string $alias, string $pred, string $pattern = '', string $sep = '|', bool $raw = false, bool $lower = false): string
     {
@@ -179,10 +243,11 @@ class ShowController extends Controller
             ? 'STR(?o)'
             : 'COALESCE(STR(?l), REPLACE(REPLACE(STR(?o), "^.*[/#]", ""), "[_-]", " "))';
         if ($lower) $v = "LCASE($v)";
+        $v = 'REPLACE(' . $v . ', "^\\\\s+|\\\\s+$", "")';
         $label = $raw ? '' : 'OPTIONAL { ?o rdfs:label ?l }';
 
         return "OPTIONAL { SELECT ?s (GROUP_CONCAT(DISTINCT $v; separator=\"$sep\") AS ?$alias) "
-            . "WHERE { ?s a schema:TVSeries . $pattern ?s $pred ?o . $label } GROUP BY ?s }\n";
+            . "WHERE { ?s a schema:TVSeries . $pattern ?s $pred ?o . $label FILTER(REGEX(STR(?o), \"[^\\\\s]\")) } GROUP BY ?s }\n";
     }
 
     /** rdfs:label dari satu IRI entitas (null kalau tidak ada di graf / bukan kelas $class). */
@@ -190,19 +255,25 @@ class ShowController extends Controller
     {
         $type = $class ? "<$iri> a $class ." : '';
         $rows = $this->select("
-            SELECT ?label WHERE { $type <$iri> rdfs:label ?label . } LIMIT 1
+            SELECT ?label 
+            WHERE { 
+                $type <$iri> rdfs:label ?label . 
+            } LIMIT 1
         ");
         return $rows[0]['label'] ?? null;
     }
 
-    /** Slug entitas ber-kelas $class yang label-nya sama (tanpa peduli huruf besar/kecil). */
+    /**
+     * Slug entitas ber-kelas $class yang label-nya sama persis (huruf besar/kecil diabaikan).
+     * Dicocokkan dengan REGEX berflag "i" di SPARQL; teks pengguna di-escape lewat reLit().
+     */
     private function slugByLabel(string $class, string $label): ?string
     {
         $rows = $this->select('
             SELECT (REPLACE(STR(?e), "^.*/", "") AS ?slug)
             WHERE {
                 ?e a ' . $class . ' ; rdfs:label ?l .
-                FILTER(LCASE(STR(?l)) = ' . self::sparqlStr(mb_strtolower($label)) . ')
+                FILTER(REGEX(STR(?l), ' . self::rx($label, '^', '$') . ', "i"))
             } LIMIT 1
         ');
         return $rows[0]['slug'] ?? null;
@@ -212,87 +283,100 @@ class ShowController extends Controller
     // Dataset penuh untuk chatbot (satu query, tanpa join di PHP)
     // ------------------------------------------------------------------
 
+    /** Teks query dataset penuh chatbot (dipisah supaya bisa di-hash untuk kunci cache). */
+    private function showsQuery(): string
+    {
+        // award & negara langsung digabung dengan ", " di SPARQL (tanpa implode di PHP)
+        $aggs = self::agg('genres', 'schema:genre')
+            . self::agg('actors', 'schema:actor')
+            . self::agg('countries', 'schema:countryOfOrigin', '', ', ')
+            . self::agg('awards', 'schema:award', '', ', ', true)
+            . self::agg('keywords', 'schema:keywords', '', '|', false, true)
+            . self::agg('platforms', 'ex:platform')
+            . self::agg('authors', 'schema:author')
+            . self::agg('companies', 'schema:productionCompany');
+        $dur = self::minutesExpr('?duration');
+        $id  = self::ID;
+
+        // genre & aktor: bentuk array ('|', ?genres/?actors) dipakai chatbot, bentuk teks (", ")
+        // dibuat di SPARQL lewat REPLACE (?genresText/?actorsText), bukan implode di PHP.
+        return "
+            SELECT ?s $id ?genres ?actors ?countries ?awards ?keywords ?platforms ?authors ?companies
+                (REPLACE(COALESCE(?genres, \"\"), \"[|]\", \", \") AS ?genresText)
+                (REPLACE(COALESCE(?actors, \"\"), \"[|]\", \", \") AS ?actorsText)
+                (COALESCE(?countries, \"\") AS ?countryText)
+                (COALESCE(?awards, \"\") AS ?awardText)
+                (SAMPLE(?name) AS ?nameValue)
+                (SAMPLE(?startDate) AS ?startDateValue)
+                (SAMPLE(?endDate) AS ?endDateValue)
+                (SAMPLE(?numberOfSeasons) AS ?numberOfSeasonsValue)
+                (SAMPLE(?numberOfEpisodes) AS ?numberOfEpisodesValue)
+                (COALESCE(SAMPLE(?contentRating), \"\") AS ?contentRatingValue)
+                (COALESCE(SAMPLE(?status), \"\") AS ?statusValue)
+                (COALESCE(SAMPLE(?dmin), 0) AS ?durationValue)
+                (COALESCE(SAMPLE(?image), \"\") AS ?imageValue)
+                (COALESCE(SAMPLE(?description), \"\") AS ?descriptionValue)
+                (COALESCE(SAMPLE(?rating), 0) AS ?ratingValue)
+                (COALESCE(SAMPLE(?votes), 0) AS ?votesValue)
+            WHERE {
+                ?s a schema:TVSeries ; schema:name ?name .
+                OPTIONAL { ?s schema:startDate ?startDate . }
+                OPTIONAL { ?s schema:endDate ?endDate . }
+                OPTIONAL { ?s schema:numberOfSeasons ?numberOfSeasons . }
+                OPTIONAL { ?s schema:numberOfEpisodes ?numberOfEpisodes . }
+                OPTIONAL { ?s schema:contentRating ?contentRating . }
+                OPTIONAL { ?s ex:status ?status . }
+                OPTIONAL { ?s schema:duration ?duration . BIND($dur AS ?dmin) }
+                OPTIONAL { ?s schema:image ?image . }
+                OPTIONAL { ?s schema:description ?description . }
+                OPTIONAL {
+                    ?s schema:aggregateRating ?r .
+                    ?r schema:ratingValue ?rating .
+                    OPTIONAL { ?r schema:ratingCount ?votes }
+                }
+                $aggs
+            }
+            GROUP BY ?s ?genres ?actors ?countries ?awards ?keywords ?platforms ?authors ?companies
+            ORDER BY DESC(xsd:decimal(?ratingValue)) ASC(STR(?s))
+        ";
+    }
+
     /**
      * Semua series dalam bentuk lengkap. Hanya dipakai ChatbotService.
      * Kolom multi-nilai diagregasi lewat subselect, bukan query terpisah yang digabung di PHP.
      */
     private function loadShows(): array
     {
-        return Cache::remember('all_shows_v11', 3600, function () {
-            $aggs = self::agg('genres', 'schema:genre')
-                . self::agg('actors', 'schema:actor')
-                . self::agg('countries', 'schema:countryOfOrigin')
-                . self::agg('awards', 'schema:award', '', '|', true)
-                . self::agg('keywords', 'schema:keywords', '', '|', false, true)
-                . self::agg('platforms', 'ex:platform')
-                . self::agg('authors', 'schema:author')
-                . self::agg('companies', 'schema:productionCompany');
-            $dur = self::minutesExpr('?duration');
-            $id  = self::ID;
+        $query = $this->showsQuery();
 
-            $rows = $this->select("
-                SELECT ?s $id ?genres ?actors ?countries ?awards ?keywords ?platforms ?authors ?companies
-                    (SAMPLE(?name) AS ?nameValue)
-                    (SAMPLE(?startDate) AS ?startDateValue)
-                    (SAMPLE(?endDate) AS ?endDateValue)
-                    (SAMPLE(?numberOfSeasons) AS ?numberOfSeasonsValue)
-                    (SAMPLE(?numberOfEpisodes) AS ?numberOfEpisodesValue)
-                    (SAMPLE(?contentRating) AS ?contentRatingValue)
-                    (SAMPLE(?status) AS ?statusValue)
-                    (SAMPLE(?dmin) AS ?durationValue)
-                    (SAMPLE(?image) AS ?imageValue)
-                    (SAMPLE(?description) AS ?descriptionValue)
-                    (SAMPLE(?rating) AS ?ratingValue)
-                    (SAMPLE(?votes) AS ?votesValue)
-                WHERE {
-                    ?s a schema:TVSeries ; schema:name ?name .
-                    OPTIONAL { ?s schema:startDate ?startDate . }
-                    OPTIONAL { ?s schema:endDate ?endDate . }
-                    OPTIONAL { ?s schema:numberOfSeasons ?numberOfSeasons . }
-                    OPTIONAL { ?s schema:numberOfEpisodes ?numberOfEpisodes . }
-                    OPTIONAL { ?s schema:contentRating ?contentRating . }
-                    OPTIONAL { ?s ex:status ?status . }
-                    OPTIONAL { ?s schema:duration ?duration . BIND($dur AS ?dmin) }
-                    OPTIONAL { ?s schema:image ?image . }
-                    OPTIONAL { ?s schema:description ?description . }
-                    OPTIONAL {
-                        ?s schema:aggregateRating ?r .
-                        ?r schema:ratingValue ?rating .
-                        OPTIONAL { ?r schema:ratingCount ?votes }
-                    }
-                    $aggs
-                }
-                GROUP BY ?s ?genres ?actors ?countries ?awards ?keywords ?platforms ?authors ?companies
-                ORDER BY DESC(xsd:decimal(?ratingValue)) ASC(STR(?s))
-            ");
+        return Cache::remember(self::qkey('all_shows', $query), 3600, function () use ($query) {
+            $rows = $this->select($query);
 
             return array_map(function ($r) {
-                $g = self::labels($r['genres'] ?? null);
-                $a = self::labels($r['actors'] ?? null);
                 return [
                     'id'                => $r['id'],
                     'name'              => $r['nameValue'],
-                    'aggregateRating'   => isset($r['ratingValue']) ? (float) $r['ratingValue'] : 0,
-                    'interactionCount'  => isset($r['votesValue']) ? (int) $r['votesValue'] : 0,
+                    'aggregateRating'   => (float) $r['ratingValue'],
+                    'interactionCount'  => (int) $r['votesValue'],
                     'startDate'         => $r['startDateValue'] ?? null,
                     'endDate'           => $r['endDateValue'] ?? null,
                     'numberOfSeasons'   => $r['numberOfSeasonsValue'] ?? null,
                     'numberOfEpisodes'  => $r['numberOfEpisodesValue'] ?? null,
-                    'contentRating'     => $r['contentRatingValue'] ?? '',
-                    'status'            => $r['statusValue'] ?? '',
-                    'duration'          => (int) ($r['durationValue'] ?? 0),
-                    'award'             => implode(', ', self::labels($r['awards'] ?? null)),
-                    'countryOfOrigin'   => implode(', ', self::labels($r['countries'] ?? null)),
-                    'image'             => $r['imageValue'] ?? '',
-                    'description'       => $r['descriptionValue'] ?? '',
-                    'genre'             => implode(', ', $g),
-                    'actor'             => implode(', ', $a),
+                    'contentRating'     => $r['contentRatingValue'],
+                    'status'            => $r['statusValue'],
+                    'duration'          => (int) $r['durationValue'],
+                    'award'             => $r['awardText'],
+                    'countryOfOrigin'   => $r['countryText'],
+                    'image'             => $r['imageValue'],
+                    'description'       => $r['descriptionValue'],
+                    'genre'             => $r['genresText'],
+                    'actor'             => $r['actorsText'],
                     'platform'          => self::labels($r['platforms'] ?? null),
                     'keywords'          => self::labels($r['keywords'] ?? null),
                     'author'            => self::labels($r['authors'] ?? null),
                     'productionCompany' => self::labels($r['companies'] ?? null),
-                    '_g'                => $g,
-                    '_a'                => $a,
+                    '_g'                => self::labels($r['genres'] ?? null),
+                    '_a'                => self::labels($r['actors'] ?? null),
                 ];
             }, $rows);
         });
@@ -303,33 +387,34 @@ class ShowController extends Controller
     // ------------------------------------------------------------------
 
     /**
-     * Kartu series, difilter oleh $pattern (graph pattern SPARQL yang memakai ?s).
+     * Teks query kartu series (dipisah dari cardsWhere() supaya bisa di-hash untuk kunci cache).
      * $pattern HANYA boleh dari kode; nilai dari pengguna wajib lewat sparqlStr().
-     * Kolom multi-nilai (genre, aktor, negara, award) diagregasi lewat subselect per kolom
-     * sehingga tidak ada cartesian product. Setiap kartu membawa 'rank' = ex:rank (0 = tidak ada).
-     * Kalau $pattern memuat VALUES (?s ?pos), urutan ditentukan ?pos (lihat cardsByIris()).
      */
-    private function cardsWhere(string $pattern, string $order = self::CARD_ORDER, bool $withDescription = false): array
+    private function cardsQuery(string $pattern, string $order = self::CARD_ORDER, bool $withDescription = false): string
     {
         $aggs = self::agg('genres', 'schema:genre', $pattern, ', ')
             . self::agg('actors', 'schema:actor', $pattern, ', ')
             . self::agg('countries', 'schema:countryOfOrigin', $pattern, ', ')
             . self::agg('awards', 'schema:award', $pattern, ', ', true);
         $pos     = str_contains($pattern, '?pos') ? '(MIN(?pos) AS ?posValue)' : '';
-        $descSel = $withDescription ? '(SAMPLE(?description) AS ?descriptionValue)' : '';
+        $descSel = $withDescription ? '(COALESCE(SAMPLE(?description), "") AS ?descriptionValue)' : '';
         $descOpt = $withDescription ? 'OPTIONAL { ?s schema:description ?description . }' : '';
         $id      = self::ID;
 
-        $rows = $this->select("
+        return "
             SELECT ?s $id ?genres ?actors ?countries ?awards
+                (COALESCE(?genres, \"\") AS ?genreText)
+                (COALESCE(?actors, \"\") AS ?actorText)
+                (COALESCE(?countries, \"\") AS ?countryText)
+                (COALESCE(?awards, \"\") AS ?awardText)
                 (SAMPLE(?name) AS ?nameValue)
                 (SAMPLE(?startDate) AS ?startDateValue)
                 (SAMPLE(?endDate) AS ?endDateValue)
                 (SAMPLE(?numberOfSeasons) AS ?numberOfSeasonsValue)
-                (SAMPLE(?image) AS ?imageValue)
-                (SAMPLE(?rating) AS ?ratingValue)
-                (SAMPLE(?votes) AS ?votesValue)
-                (SAMPLE(?rank) AS ?rankValue)
+                (COALESCE(SAMPLE(?image), \"\") AS ?imageValue)
+                (COALESCE(SAMPLE(?rating), 0) AS ?ratingValue)
+                (COALESCE(SAMPLE(?votes), 0) AS ?votesValue)
+                (COALESCE(SAMPLE(?rank), 0) AS ?rankValue)
                 $descSel
                 $pos
             WHERE {
@@ -350,70 +435,35 @@ class ShowController extends Controller
             }
             GROUP BY ?s ?genres ?actors ?countries ?awards
             ORDER BY $order
-        ");
-
-        return array_map(fn ($r) => [
-            'id'               => $r['id'],
-            'name'             => $r['nameValue'],
-            'rank'             => isset($r['rankValue']) ? (int) $r['rankValue'] : 0,
-            'aggregateRating'  => isset($r['ratingValue']) ? (float) $r['ratingValue'] : 0,
-            'interactionCount' => isset($r['votesValue']) ? (int) $r['votesValue'] : 0,
-            'startDate'        => $r['startDateValue'] ?? null,
-            'endDate'          => $r['endDateValue'] ?? null,
-            'numberOfSeasons'  => $r['numberOfSeasonsValue'] ?? null,
-            'award'            => $r['awards'] ?? '',
-            'countryOfOrigin'  => $r['countries'] ?? '',
-            'image'            => $r['imageValue'] ?? '',
-            'genre'            => $r['genres'] ?? '',
-            'actor'            => $r['actors'] ?? '',
-        ] + ($withDescription ? ['description' => $r['descriptionValue'] ?? ''] : []), $rows);
+        ";
     }
 
     /**
-     * Series (field kartu saja) yang terhubung ke satu entitas lewat satu predikat:
-     *   ?s {$predicate} <$iri>
-     * Dipakai halaman company, country, language.
-     * $predicate HANYA boleh dari kode (konstanta), bukan dari input pengguna.
+     * Kartu series, difilter oleh $pattern (graph pattern SPARQL yang memakai ?s).
+     * $pattern HANYA boleh dari kode; nilai dari pengguna wajib lewat sparqlStr().
+     * Kolom multi-nilai (genre, aktor, negara, award) diagregasi lewat subselect per kolom
+     * sehingga tidak ada cartesian product. Setiap kartu membawa 'rank' = ex:rank (0 = tidak ada).
+     * Kalau $pattern memuat VALUES (?s ?pos), urutan ditentukan ?pos (lihat cardsByIris()).
      */
-    private function cardsLinkedTo(string $predicate, string $iri): array
+    private function cardsWhere(string $pattern, string $order = self::CARD_ORDER, bool $withDescription = false): array
     {
-        $id = self::ID;
-        $rows = $this->select("
-            SELECT ?s $id
-                (SAMPLE(?name) AS ?nameValue)
-                (SAMPLE(?startDate) AS ?startDateValue)
-                (SAMPLE(?endDate) AS ?endDateValue)
-                (SAMPLE(?image) AS ?imageValue)
-                (SAMPLE(?rating) AS ?ratingValue)
-                (SAMPLE(?votes) AS ?votesValue)
-                (SAMPLE(?seasons) AS ?seasonsValue)
-            WHERE {
-                ?s $predicate <$iri> .
-                ?s a schema:TVSeries ; schema:name ?name .
-                OPTIONAL { ?s schema:startDate ?startDate . }
-                OPTIONAL { ?s schema:endDate ?endDate . }
-                OPTIONAL { ?s schema:image ?image . }
-                OPTIONAL { ?s schema:numberOfSeasons ?seasons . }
-                OPTIONAL {
-                    ?s schema:aggregateRating ?r .
-                    ?r schema:ratingValue ?rating .
-                    OPTIONAL { ?r schema:ratingCount ?votes . }
-                }
-            }
-            GROUP BY ?s
-            ORDER BY DESC(xsd:decimal(?ratingValue)) DESC(xsd:integer(?votesValue)) ASC(STR(?s))
-        ");
+        $rows = $this->select($this->cardsQuery($pattern, $order, $withDescription));
 
         return array_map(fn ($r) => [
             'id'               => $r['id'],
             'name'             => $r['nameValue'],
-            'aggregateRating'  => isset($r['ratingValue']) ? (float) $r['ratingValue'] : 0,
-            'interactionCount' => isset($r['votesValue']) ? (int) $r['votesValue'] : 0,
+            'rank'             => (int) $r['rankValue'],
+            'aggregateRating'  => (float) $r['ratingValue'],
+            'interactionCount' => (int) $r['votesValue'],
             'startDate'        => $r['startDateValue'] ?? null,
             'endDate'          => $r['endDateValue'] ?? null,
-            'image'            => $r['imageValue'] ?? '',
-            'numberOfSeasons'  => $r['seasonsValue'] ?? null,
-        ], $rows);
+            'numberOfSeasons'  => $r['numberOfSeasonsValue'] ?? null,
+            'award'            => $r['awardText'],
+            'countryOfOrigin'  => $r['countryText'],
+            'image'            => $r['imageValue'],
+            'genre'            => $r['genreText'],
+            'actor'            => $r['actorText'],
+        ] + ($withDescription ? ['description' => $r['descriptionValue']] : []), $rows);
     }
 
     /** Kartu untuk daftar IRI; urutan ditentukan di SPARQL lewat VALUES (?s ?pos). */
@@ -435,6 +485,7 @@ class ShowController extends Controller
     // ------------------------------------------------------------------
 
     // Sama dengan norm() di search-core.js: buang aksen + huruf kecil (pada input pengguna)
+    // (normalisasi aksen/Unicode tidak ada padanannya di SPARQL, jadi tetap di PHP)
     private static function normText(string $s): string
     {
         if (class_exists(\Normalizer::class)) {
@@ -522,6 +573,14 @@ class ShowController extends Controller
      * Susun query pencarian. Return [fitur (OPTIONAL + BIND skor), FILTER, ORDER BY].
      * Skor relevansi: judul 6/5/3, genre 4/2, cast 3/2, tahun 3/2, platform & negara 1.5 (scope "all"),
      * semua token wajib cocok, + bonus frasa (judul +6, cast +4).
+     * Pencocokan teks memakai REGEX() di SPARQL. Teks yang dicocokkan (?tl, ?gt, ?ct, ?pt, ?kt)
+     * sudah huruf kecil lewat LCASE dan token pencarian huruf kecil lewat normText(); flag "i"
+     * tetap dipasang pada setiap REGEX sebagai pengaman (hasilnya sama, tidak bergantung LCASE):
+     *   "^tok"        = diawali token          "(^| )tok"   = awal kata
+     *   "(^|[|])tok"  = awal nama genre        "tok"        = mengandung token
+     *
+     * Catatan skala: REGEX atas seluruh series tidak bisa memakai indeks. Kalau jumlah series
+     * sudah besar (ribuan+), pertimbangkan full-text index Jena (jena-text, text:query).
      */
     private function searchPlan(array $p): array
     {
@@ -538,6 +597,8 @@ class ShowController extends Controller
         $features = '';
         $conds    = [];
         $terms    = [];
+        // REGEX berflag "i" (abaikan huruf besar/kecil) untuk teks $v; $pre = potongan pola dari kode
+        $rg = fn (string $v, string $t, string $pre = '') => 'REGEX(' . $v . ', ' . self::rx($t, $pre) . ', "i")';
         if ($toks) {
             // teks label per series, dikumpulkan sekali
             if ($useGenre) $features .= self::textOf('gtxt', 'schema:genre');
@@ -556,18 +617,21 @@ class ShowController extends Controller
             }
 
             foreach ($toks as $i => $tok) {
-                $T = self::sparqlStr($tok);
                 $c = [];
                 if ($useTitle) {
-                    $features .= "BIND(IF(STRSTARTS(?tl, $T), 6, IF(CONTAINS(CONCAT(' ', ?tl), CONCAT(' ', $T)), 5, IF(CONTAINS(?tl, $T), 3, 0))) AS ?ti{$i})\n";
+                    $features .= 'BIND(IF(' . $rg('?tl', $tok, '^') . ', 6, '
+                        . 'IF(' . $rg('?tl', $tok, '(^| )') . ', 5, '
+                        . 'IF(' . $rg('?tl', $tok) . ", 3, 0))) AS ?ti{$i})\n";
                     $c[] = "?ti{$i}";
                 }
                 if ($useGenre) {
-                    $features .= "BIND(IF(CONTAINS(CONCAT('|', ?gt), CONCAT('|', $T)), 4, IF(CONTAINS(?gt, $T), 2, 0)) AS ?tg{$i})\n";
+                    $features .= 'BIND(IF(' . $rg('?gt', $tok, '(^|[|])') . ', 4, '
+                        . 'IF(' . $rg('?gt', $tok) . ", 2, 0)) AS ?tg{$i})\n";
                     $c[] = "?tg{$i}";
                 }
                 if ($useCast) {
-                    $features .= "BIND(IF(CONTAINS(REPLACE(CONCAT('|', ?ct), '[|]', ' '), CONCAT(' ', $T)), 3, IF(CONTAINS(?ct, $T), 2, 0)) AS ?tc{$i})\n";
+                    $features .= 'BIND(IF(' . $rg('?ct', $tok, '(^|[| ])') . ', 3, '
+                        . 'IF(' . $rg('?ct', $tok) . ", 2, 0)) AS ?tc{$i})\n";
                     $c[] = "?tc{$i}";
                 }
                 if ($useYear && ($yr = self::yearRange($tok))) {
@@ -576,8 +640,8 @@ class ShowController extends Controller
                     $c[] = "?ty{$i}";
                 }
                 if ($useMeta) {
-                    $features .= "BIND(IF(CONTAINS(?pt, $T), 1.5, 0) AS ?tp{$i})\n";
-                    $features .= "BIND(IF(CONTAINS(?kt, $T), 1.5, 0) AS ?tk{$i})\n";
+                    $features .= 'BIND(IF(' . $rg('?pt', $tok) . ", 1.5, 0) AS ?tp{$i})\n";
+                    $features .= 'BIND(IF(' . $rg('?kt', $tok) . ", 1.5, 0) AS ?tk{$i})\n";
                     $c[] = "?tp{$i}";
                     $c[] = "?tk{$i}";
                 }
@@ -595,9 +659,9 @@ class ShowController extends Controller
 
             // bonus frasa
             if (count($toks) > 1) {
-                $ph = self::sparqlStr(implode(' ', $toks));
-                if ($useTitle) $terms[] = "IF(CONTAINS(?tl, $ph), 6, 0)";
-                if ($useCast)  $terms[] = "IF(CONTAINS(?ct, $ph), 4, 0)";
+                $ph = implode(' ', $toks);
+                if ($useTitle) $terms[] = 'IF(' . $rg('?tl', $ph) . ', 6, 0)';
+                if ($useCast)  $terms[] = 'IF(' . $rg('?ct', $ph) . ', 4, 0)';
             }
             $features .= 'BIND(' . implode(' + ', $terms) . " AS ?score)\n";
         }
@@ -658,35 +722,35 @@ class ShowController extends Controller
     }
 
     /**
-     * Hasil berhalaman: jumlah (COUNT) dan halaman (LIMIT/OFFSET) diambil dari graf,
-     * lalu kartu halaman itu diambil lewat cardsByIris(). ?page=N&per=M
+     * Hasil berhalaman: jumlah (COUNT) dan halaman (LIMIT/OFFSET) diambil dari graf dan
+     * disimpan dalam SATU entri cache (total, halaman, dan IRI selalu sinkron), lalu kartu
+     * halaman itu diambil lewat cardsByIris(). ?page=N&per=M
+     * Kunci cache memuat hash teks query, jadi otomatis berganti kalau query berubah.
      * $spec = [fitur, filter, order, cap|null]
      */
     private function paged(Request $request, string $cacheKey, array $spec, int $ttl, int $defaultPer = 21, bool $withDescription = false): array
     {
         [$features, $filters, $order, $cap] = $spec;
 
-        $per   = min(max((int) $request->query('per', $defaultPer), 1), 50);
-        $total = Cache::remember(
-            $cacheKey . '_n',
-            $ttl,
-            fn () => $this->countIris($features, $filters, $order, $cap)
-        );
-        $pages = max(1, (int) ceil($total / $per));
-        $page  = min(max((int) $request->query('page', 1), 1), $pages);
-        $off   = ($page - 1) * $per;
+        $per     = min(max((int) $request->query('per', $defaultPer), 1), 50);
+        $reqPage = min(max((int) $request->query('page', 1), 1), 1000);   // batas atas: cegah kunci cache liar
+        $key     = self::qkey($cacheKey, self::irisQuery($features, $filters) . "|$order|$cap") . "_{$per}_{$reqPage}";
 
-        $iris = $total === 0 ? [] : Cache::remember(
-            "{$cacheKey}_{$per}_{$page}",
-            $ttl,
-            fn () => $this->rankedIris($features, $filters, $order, min($per, $total - $off), $off)
-        );
+        $res = Cache::remember($key, $ttl, function () use ($features, $filters, $order, $cap, $per, $reqPage) {
+            $total = $this->countIris($features, $filters, $order, $cap);
+            $pages = max(1, (int) ceil($total / $per));
+            $page  = min($reqPage, $pages);
+            $off   = ($page - 1) * $per;
+            $iris  = $total === 0 ? [] : $this->rankedIris($features, $filters, $order, max(0, min($per, $total - $off)), $off);
+
+            return ['total' => $total, 'page' => $page, 'pages' => $pages, 'iris' => $iris];
+        });
 
         return [
-            'total' => $total,
-            'page'  => $page,
-            'pages' => $pages,
-            'shows' => $this->cardsByIris($iris, $withDescription),
+            'total' => $res['total'],
+            'page'  => $res['page'],
+            'pages' => $res['pages'],
+            'shows' => $this->cardsByIris($res['iris'], $withDescription),
         ];
     }
 
@@ -712,34 +776,45 @@ class ShowController extends Controller
     /**
      * Facet panel filter (genre, platform, negara, rentang tahun). Kecil, di-cache.
      * Dikirim ke halaman search lewat window.ITV_FACETS.
+     * Rentang tahun: nilai cadangan (1950 / tahun berjalan) dihitung di SPARQL lewat COALESCE.
      */
     private function searchFacets(): array
     {
-        return Cache::remember('search_facets_v2', 3600, function () {
-            $count = function (string $pattern, string $label): array {
-                $rows = $this->select("
-                    SELECT ?name (COUNT(DISTINCT ?s) AS ?n)
-                    WHERE { ?s a schema:TVSeries . $pattern BIND($label AS ?name) }
-                    GROUP BY ?name
-                    ORDER BY DESC(?n) ASC(?name)
-                ");
-                return array_map(fn ($r) => ['name' => $r['name'], 'n' => (int) $r['n']], $rows);
-            };
+        $countQ = fn (string $pattern, string $label): string => "
+            SELECT ?name (COUNT(DISTINCT ?s) AS ?n)
+            WHERE { ?s a schema:TVSeries . $pattern BIND($label AS ?name) }
+            GROUP BY ?name
+            ORDER BY DESC(?n) ASC(?name)
+        ";
 
-            $years = $this->select('
-                SELECT (MIN(?y) AS ?mn) (MAX(?y) AS ?mx)
+        $queries = [
+            'genres'    => $countQ('?s schema:genre ?g . OPTIONAL { ?g rdfs:label ?gl }', 'STR(COALESCE(?gl, REPLACE(STR(?g), "^.*[/#]", "")))'),
+            'platforms' => $countQ('?s ex:platform ?p . OPTIONAL { ?p rdfs:label ?pl }', 'STR(COALESCE(?pl, REPLACE(STR(?p), "^.*[/#]", "")))'),
+            'countries' => $countQ('?s schema:countryOfOrigin ?c . OPTIONAL { ?c rdfs:label ?cl }', 'STR(COALESCE(?cl, REPLACE(REPLACE(STR(?c), "^.*[/#]", ""), "_", " ")))'),
+            // tahun: 4 digit pertama startDate, disaring dan diambil dengan REGEX
+            'years'     => '
+                SELECT (COALESCE(MIN(?y), 1950) AS ?mn) (COALESCE(MAX(?y), YEAR(NOW())) AS ?mx)
                 WHERE {
                     ?s a schema:TVSeries ; schema:startDate ?sd .
-                    BIND(xsd:integer(SUBSTR(STR(?sd), 1, 4)) AS ?y)
+                    FILTER(REGEX(STR(?sd), "^[0-9]{4}"))
+                    BIND(xsd:integer(REPLACE(STR(?sd), "^([0-9]{4}).*$", "$1")) AS ?y)
                 }
-            ');
+            ',
+        ];
+
+        return Cache::remember(self::qkey('search_facets', implode('|', $queries)), 3600, function () use ($queries) {
+            $count = fn (string $q): array => array_map(
+                fn ($r) => ['name' => $r['name'], 'n' => (int) $r['n']],
+                $this->select($q)
+            );
+            $years = $this->select($queries['years']);
 
             return [
-                'genres'    => $count('?s schema:genre ?g . OPTIONAL { ?g rdfs:label ?gl }', 'STR(COALESCE(?gl, REPLACE(STR(?g), "^.*[/#]", "")))'),
-                'platforms' => $count('?s ex:platform ?p . OPTIONAL { ?p rdfs:label ?pl }', 'STR(COALESCE(?pl, REPLACE(STR(?p), "^.*[/#]", "")))'),
-                'countries' => $count('?s schema:countryOfOrigin ?c . OPTIONAL { ?c rdfs:label ?cl }', 'STR(COALESCE(?cl, REPLACE(REPLACE(STR(?c), "^.*[/#]", ""), "_", " ")))'),
-                'minYear'   => !empty($years[0]['mn']) ? (int) $years[0]['mn'] : 1950,
-                'maxYear'   => !empty($years[0]['mx']) ? (int) $years[0]['mx'] : (int) date('Y'),
+                'genres'    => $count($queries['genres']),
+                'platforms' => $count($queries['platforms']),
+                'countries' => $count($queries['countries']),
+                'minYear'   => (int) $years[0]['mn'],
+                'maxYear'   => (int) $years[0]['mx'],
             ];
         });
     }
@@ -750,9 +825,100 @@ class ShowController extends Controller
     {
         $p    = $this->searchParams($request);
         $plan = $this->searchPlan($p);
-        $key  = 'search_v3_' . md5(implode('|', $plan));
+        $key  = 'search_' . md5(implode('|', $plan));
 
         return response()->json($this->paged($request, $key, [...$plan, null], 600));
+    }
+
+    /**
+     * Cari entitas berdasarkan potongan namanya: REGEX berflag "i" pada rdfs:label di SPARQL
+     * (pola yang sama dengan FILTER(REGEX(STR(?namaLengkap), "man", "i"))).
+     * $class = kelas entitas, $link = pola relasi ?s -> ?e (keduanya HANYA dari kode).
+     * Hasil: [{slug, name, count}] diurutkan dari yang paling banyak series-nya.
+     */
+    private function entitySearch(Request $request, string $class, string $link): array
+    {
+        $q = mb_substr(trim((string) $request->query('q', '')), 0, 100);
+        if ($q === '') return [];
+
+        $per  = min(max((int) $request->query('per', 10), 1), 50);
+        $rows = $this->select('
+            SELECT (REPLACE(STR(?e), "^.*/", "") AS ?slug)
+                (SAMPLE(?l) AS ?name)
+                (COUNT(DISTINCT ?s) AS ?n)
+            WHERE {
+                { SELECT ?e ?l WHERE {
+                    ?e a ' . $class . ' ; rdfs:label ?l .
+                    FILTER(REGEX(STR(?l), ' . self::rx($q) . ', "i"))
+                } }
+                ' . $link . '
+                ?s a schema:TVSeries .
+            }
+            GROUP BY ?e
+            ORDER BY DESC(?n) ASC(LCASE(STR(?name)))
+            LIMIT ' . $per . '
+        ');
+
+        return array_map(fn ($r) => [
+            'slug'  => $r['slug'],
+            'name'  => $r['name'],
+            'count' => (int) $r['n'],
+        ], $rows);
+    }
+
+    // /api/people?q=bryan&per=10 -> [{slug, name, count}]
+    // Orang (aktor ATAU pembuat) yang namanya mengandung q. Slug dipakai untuk /person/{slug}.
+    public function peopleApi(Request $request)
+    {
+        return response()->json($this->entitySearch(
+            $request,
+            'schema:Person',
+            '{ ?s schema:actor ?e } UNION { ?s schema:author ?e }'
+        ));
+    }
+
+    // /api/keywords?q=murder&per=10 -> [{slug, name, count}]
+    // Keyword yang namanya mengandung q. Slug dipakai untuk /keyword/{slug}.
+    public function keywordsApi(Request $request)
+    {
+        return response()->json($this->entitySearch($request, 'ex:Keyword', '?s schema:keywords ?e .'));
+    }
+
+    /**
+     * /api/quick?q=korea&per=20 -> [kartu series]
+     * Pencarian cepat: kata yang diketik (?kata) dicocokkan dengan judul, nama alternatif, genre,
+     * platform, ATAU negara series. Polanya: satu FILTER berisi REGEX(judul) || EXISTS { ... REGEX ... }
+     * per kolom. EXISTS dipakai (bukan OPTIONAL berantai) supaya genre x platform x negara tidak
+     * menjadi cartesian product, dan GROUP BY ?s memastikan satu series hanya muncul sekali
+     * walau punya beberapa nama.
+     * Teks pengguna di-escape lewat rx() sebelum dijadikan ?kata.
+     */
+    public function quickSearchApi(Request $request)
+    {
+        $q = mb_substr(trim((string) $request->query('q', '')), 0, 100);
+        if ($q === '') return response()->json([]);
+
+        $per  = min(max((int) $request->query('per', 20), 1), 50);
+        $rows = $this->select('
+            SELECT ?s (MIN(STR(?name)) AS ?nm)
+            WHERE {
+                ?s a schema:TVSeries ;
+                   schema:name ?name .
+                BIND(' . self::rx($q) . ' AS ?kata)
+                FILTER(
+                    REGEX(?name, ?kata, "i") ||
+                    EXISTS { ?s schema:alternateName ?alt . FILTER(REGEX(STR(?alt), ?kata, "i")) } ||
+                    EXISTS { ?s schema:genre ?g . ?g rdfs:label ?genre . FILTER(REGEX(STR(?genre), ?kata, "i")) } ||
+                    EXISTS { ?s ex:platform ?pf . ?pf rdfs:label ?platform . FILTER(REGEX(STR(?platform), ?kata, "i")) } ||
+                    EXISTS { ?s schema:countryOfOrigin ?c . ?c rdfs:label ?country . FILTER(REGEX(STR(?country), ?kata, "i")) }
+                )
+            }
+            GROUP BY ?s
+            ORDER BY ?nm
+            LIMIT ' . $per . '
+        ');
+
+        return response()->json($this->cardsByIris(array_column($rows, 's')));
     }
 
     // /api/category/popular?page=2 -> {total, page, pages, shows:[kartu]}
@@ -760,7 +926,7 @@ class ShowController extends Controller
     {
         abort_unless(in_array($slug, ['top-picks', 'popular', 'long-running', 'awards', 'asian'], true), 404);
 
-        return response()->json($this->paged($request, 'category_v3_' . $slug, $this->categorySpec($slug), 3600));
+        return response()->json($this->paged($request, 'category_' . $slug, $this->categorySpec($slug), 3600));
     }
 
     // /api/top-rated?page=2&per=12 -> {total, page, pages, shows:[kartu + 'rank' + 'description']}
@@ -770,7 +936,7 @@ class ShowController extends Controller
         return response()->json(
             $this->paged(
                 $request,
-                'top_rated_v3',
+                'top_rated',
                 ['', 'BOUND(?rank)', self::BY_RANK, null],
                 3600,
                 self::TOP_PER,
@@ -780,30 +946,36 @@ class ShowController extends Controller
     }
 
     /**
-     * Posisi (1-based) sebuah rank dalam urutan Top Rated, dihitung di graf:
-     * jumlah series ber-rank lebih kecil + 1. Null kalau tidak ada series dengan rank itu.
+     * Halaman (1-based) tempat sebuah rank berada di daftar Top Rated, dihitung seluruhnya di graf:
+     * halaman = FLOOR(jumlah series ber-rank lebih kecil / $per) + 1.
+     * Null kalau tidak ada series dengan rank itu.
      */
-    private function rankPosition(int $rank): ?int
+    private function rankPage(int $rank, int $per): ?int
     {
-        return Cache::remember("rank_pos_v1_$rank", 3600, function () use ($rank) {
-            $rows = $this->select("
-                SELECT (SUM(IF(?rk < $rank, 1, 0)) AS ?before)
-                       (SUM(IF(?rk = $rank, 1, 0)) AS ?hit)
-                WHERE {
-                    ?s a schema:TVSeries ; ex:rank ?rkr .
-                    BIND(xsd:integer(?rkr) AS ?rk)
-                    FILTER(?rk <= $rank)
-                }
-            ");
+        $sql = "
+            SELECT (xsd:integer(FLOOR(SUM(IF(?rk < $rank, 1, 0)) / $per)) + 1 AS ?page)
+                   (SUM(IF(?rk = $rank, 1, 0)) AS ?hit)
+            WHERE {
+                ?s a schema:TVSeries ; ex:rank ?rkr .
+                BIND(xsd:integer(?rkr) AS ?rk)
+                FILTER(?rk <= $rank)
+            }
+        ";
+
+        return Cache::remember(self::qkey("rank_page_{$rank}_{$per}", $sql), 3600, function () use ($sql) {
+            $rows = $this->select($sql);
             if ((int) ($rows[0]['hit'] ?? 0) === 0) return null;
-            return (int) ($rows[0]['before'] ?? 0) + 1;
+            return (int) ($rows[0]['page'] ?? 1);
         });
     }
 
     /**
      * Rekomendasi mirip: skor gabungan genre (Jaccard), keywords (cosine), cast (maks 3 orang).
      * Series yang tidak berbagi apa pun dengan series ini tidak ikut.
-     * Skor dihitung di SPARQL (butuh Jena/Fuseki: afn:sqrt), lalu kartu 12 teratas diambil lewat cardsByIris().
+     * Skor dihitung di SPARQL, lalu kartu 12 teratas diambil lewat cardsByIris().
+     *
+     * KETERGANTUNGAN: butuh Apache Jena/Fuseki karena memakai afn:sqrt (bukan SPARQL 1.1 standar).
+     * Kalau triplestore diganti, ganti afn:sqrt dengan fungsi setara di triplestore baru.
      */
     private function similarTo(string $id, int $limit = 12): array
     {
@@ -876,11 +1048,13 @@ class ShowController extends Controller
             return $this->cardsByIris(array_map(fn ($i) => self::SERIES_NS . $i, array_slice($ids, 0, 10)));
         }
 
-        $seed = date('Ymd');
+        // Seed harian dihitung di SPARQL: NOW() = "2026-11-20T08:15:00Z" -> REGEX -> "20261120"
+        // (tanggal mengikuti zona waktu server SPARQL, biasanya UTC)
+        $day = 'REPLACE(STR(NOW()), "^([0-9]{4})-([0-9]{2})-([0-9]{2}).*$", "$1$2$3")';
         return $this->cardsByIris($this->rankedIris(
             '',
             'COALESCE(?rt, 0) >= 8',
-            'ASC(SHA1(CONCAT(STR(?s), "' . $seed . '")))' . self::TIE,
+            'ASC(SHA1(CONCAT(STR(?s), ' . $day . ')))' . self::TIE,
             10
         ));
     }
@@ -906,8 +1080,13 @@ class ShowController extends Controller
 
     public function home()
     {
-        // Cache per hari (kunci memuat tanggal) karena "recommended" bisa acak harian
-        $rows = Cache::remember('home_rows_v1_' . date('Ymd'), 3600, fn () => $this->homeRows());
+        // Cache per hari (kunci memuat tanggal) karena "recommended" bisa acak harian.
+        // Kunci juga memuat hash spesifikasi query tiap baris, jadi berganti otomatis kalau query berubah.
+        $sig = self::CORE . json_encode([
+            self::HOME_ROWS, self::RECOMMENDED_IDS, self::HOME_LIMIT,
+            array_map(fn ($r) => $r[0] === 'recommended' ? '' : $this->categorySpec($r[0]), self::HOME_ROWS),
+        ]);
+        $rows = Cache::remember(self::qkey('home_rows_' . date('Ymd'), $sig), 3600, fn () => $this->homeRows());
 
         // 'shows' dikosongkan: beranda tidak lagi mengirim seluruh series ke browser
         return view('home', ['shows' => [], 'rows' => $rows]);
@@ -982,52 +1161,52 @@ class ShowController extends Controller
     /**
      * Tile entitas (genre / platform): satu entitas $class per tile, jumlah series lewat $pred,
      * cover = series ber-rating tertinggi yang punya gambar (dipilih di graf lewat FILTER NOT EXISTS),
-     * dan pengurutan ($order) juga di graf. Hasil kecil, di-cache.
+     * dan pengurutan ($order) juga di graf. Hasil kecil, di-cache (kunci = hash teks query).
      */
     private function entityTiles(string $cacheKey, string $class, string $pred, string $order): array
     {
-        return Cache::remember($cacheKey, 3600, function () use ($class, $pred, $order) {
-            $rows = $this->select("
-                SELECT (REPLACE(STR(?e), \"^.*/\", \"\") AS ?slug)
-                    (SAMPLE(?label) AS ?name)
-                    (COUNT(DISTINCT ?s) AS ?n)
-                    (SAMPLE(?img) AS ?cover)
-                WHERE {
-                    ?e a $class ; rdfs:label ?label .
-                    ?s a schema:TVSeries ; $pred ?e .
-                    OPTIONAL {
-                        SELECT ?e (SAMPLE(?image) AS ?img) WHERE {
-                            ?c1 $pred ?e ; schema:image ?image ; schema:aggregateRating/schema:ratingValue ?r1 .
-                            FILTER NOT EXISTS {
-                                ?c2 $pred ?e ; schema:image ?i2 ; schema:aggregateRating/schema:ratingValue ?r2 .
-                                FILTER(xsd:decimal(?r2) > xsd:decimal(?r1)
-                                    || (xsd:decimal(?r2) = xsd:decimal(?r1) && STR(?c2) < STR(?c1)))
-                            }
-                        } GROUP BY ?e
-                    }
+        $sql = "
+            SELECT (REPLACE(STR(?e), \"^.*/\", \"\") AS ?slug)
+                (SAMPLE(?label) AS ?name)
+                (COUNT(DISTINCT ?s) AS ?n)
+                (SAMPLE(?img) AS ?cover)
+            WHERE {
+                ?e a $class ; rdfs:label ?label .
+                ?s a schema:TVSeries ; $pred ?e .
+                OPTIONAL {
+                    SELECT ?e (SAMPLE(?image) AS ?img) WHERE {
+                        ?c1 $pred ?e ; schema:image ?image ; schema:aggregateRating/schema:ratingValue ?r1 .
+                        FILTER NOT EXISTS {
+                            ?c2 $pred ?e ; schema:image ?i2 ; schema:aggregateRating/schema:ratingValue ?r2 .
+                            FILTER(xsd:decimal(?r2) > xsd:decimal(?r1)
+                                || (xsd:decimal(?r2) = xsd:decimal(?r1) && STR(?c2) < STR(?c1)))
+                        }
+                    } GROUP BY ?e
                 }
-                GROUP BY ?e
-                ORDER BY $order
-            ");
+            }
+            GROUP BY ?e
+            ORDER BY $order
+        ";
 
+        return Cache::remember(self::qkey($cacheKey, $sql), 3600, function () use ($sql) {
             return array_map(fn ($r) => [
                 'slug'  => $r['slug'],
                 'name'  => $r['name'],
                 'count' => (int) $r['n'],
                 'cover' => $r['cover'] ?? '',
-            ], $rows);
+            ], $this->select($sql));
         });
     }
 
     private function genreTiles(): array
     {
-        return $this->entityTiles('genre_tiles_v2', 'ex:Genre', 'schema:genre', 'ASC(LCASE(?name))');
+        return $this->entityTiles('genre_tiles', 'ex:Genre', 'schema:genre', 'ASC(LCASE(?name))');
     }
 
     // Yang paling banyak series-nya di depan
     private function platformTiles(): array
     {
-        return $this->entityTiles('platform_tiles_v2', 'ex:Platform', 'ex:platform', 'DESC(?n) ASC(LCASE(?name))');
+        return $this->entityTiles('platform_tiles', 'ex:Platform', 'ex:platform', 'DESC(?n) ASC(LCASE(?name))');
     }
 
     /**
@@ -1035,6 +1214,7 @@ class ShowController extends Controller
      * pencarian judul (?q), urutan (?sort) dan paginasi (?page, ?per), semuanya di SPARQL.
      * Dipakai /api/genre/{slug} dan /api/platform/{slug}.
      * $pred HANYA boleh dari kode; $iri disusun dari slug yang sudah divalidasi.
+     * Pencarian judul memakai REGEX berflag "i" (teks pengguna di-escape lewat reLit()).
      */
     private function entityShows(Request $request, string $cachePrefix, string $pred, string $iri): array
     {
@@ -1050,7 +1230,7 @@ class ShowController extends Controller
         } . self::TIE;
 
         $features = "?s $pred <$iri> .\n";
-        $filters  = $q !== '' ? 'CONTAINS(LCASE(STR(?name)), ' . self::sparqlStr($q) . ')' : '';
+        $filters  = $q !== '' ? 'REGEX(STR(?name), ' . self::rx($q) . ', "i")' : '';
         $key      = $cachePrefix . md5("$pred|$iri|$q|$sort");
 
         return $this->paged($request, $key, [$features, $filters, $order, null], 3600);
@@ -1084,7 +1264,7 @@ class ShowController extends Controller
         $uri = self::GENRE_NS . $slug;
         abort_if($this->labelOf($uri, 'ex:Genre') === null, 404);
 
-        return response()->json($this->entityShows($request, 'genre_shows_v2_', 'schema:genre', $uri));
+        return response()->json($this->entityShows($request, 'genre_shows_', 'schema:genre', $uri));
     }
 
     // /platform            -> daftar tile
@@ -1115,7 +1295,7 @@ class ShowController extends Controller
         $uri = self::PLATFORM_NS . $slug;
         abort_if($this->labelOf($uri, 'ex:Platform') === null, 404);
 
-        return response()->json($this->entityShows($request, 'platform_shows_v2_', 'ex:platform', $uri));
+        return response()->json($this->entityShows($request, 'platform_shows_', 'ex:platform', $uri));
     }
 
     /**
@@ -1140,9 +1320,9 @@ class ShowController extends Controller
         $page = max(1, (int) $request->query('page', 1));
 
         if ($rank !== null) {
-            $pos = $this->rankPosition($rank);
-            abort_if($pos === null, 404);
-            $page = intdiv($pos - 1, $per) + 1;
+            // nomor halaman dihitung di SPARQL (rankPage), bukan di PHP
+            $page = $this->rankPage($rank, $per);
+            abort_if($page === null, 404);
         }
 
         return view('top-rated', [
@@ -1181,10 +1361,11 @@ class ShowController extends Controller
         $label = $this->labelOf($uri);
         abort_if($label === null, 404);
 
+        $pattern = "?s schema:keywords <$uri> .";
         $shows = Cache::remember(
-            'keyword_shows_v2_' . $slug,
+            self::qkey('keyword_shows', $this->cardsQuery($pattern)),
             3600,
-            fn () => $this->cardsWhere("?s schema:keywords <$uri> .")
+            fn () => $this->cardsWhere($pattern)
         );
 
         return view('keyword', ['shows' => $shows, 'keyword' => $label]);
@@ -1200,7 +1381,8 @@ class ShowController extends Controller
         $label = $this->labelOf($uri);
         abort_if($label === null, 404);
 
-        $shows = Cache::remember('company_shows_v1_' . $slug, 3600, fn () => $this->cardsLinkedTo('schema:productionCompany', $uri));
+        $pattern = "?s schema:productionCompany <$uri> .";
+        $shows = Cache::remember(self::qkey('company_shows', $this->cardsQuery($pattern)), 3600, fn () => $this->cardsWhere($pattern));
 
         return view('company', ['shows' => $shows, 'company' => $label]);
     }
@@ -1215,7 +1397,8 @@ class ShowController extends Controller
         $label = $this->labelOf($uri);
         abort_if($label === null, 404);
 
-        $shows = Cache::remember('country_shows_v1_' . $slug, 3600, fn () => $this->cardsLinkedTo('schema:countryOfOrigin', $uri));
+        $pattern = "?s schema:countryOfOrigin <$uri> .";
+        $shows = Cache::remember(self::qkey('country_shows', $this->cardsQuery($pattern)), 3600, fn () => $this->cardsWhere($pattern));
 
         return view('country', ['shows' => $shows, 'country' => $label]);
     }
@@ -1229,7 +1412,8 @@ class ShowController extends Controller
         $label = $this->labelOf($uri);
         abort_if($label === null, 404);
 
-        $shows = Cache::remember('language_shows_v1_' . $slug, 3600, fn () => $this->cardsLinkedTo('ex:spokenLanguage', $uri));
+        $pattern = "?s ex:spokenLanguage <$uri> .";
+        $shows = Cache::remember(self::qkey('language_shows', $this->cardsQuery($pattern)), 3600, fn () => $this->cardsWhere($pattern));
 
         return view('language', ['shows' => $shows, 'language' => $label]);
     }
@@ -1254,9 +1438,9 @@ class ShowController extends Controller
                 (SAMPLE(?name) AS ?nameValue)
                 (SAMPLE(?startDate) AS ?startDateValue)
                 (SAMPLE(?endDate) AS ?endDateValue)
-                (SAMPLE(?image) AS ?imageValue)
-                (SAMPLE(?rating) AS ?ratingValue)
-                (SAMPLE(?votes) AS ?votesValue)
+                (COALESCE(SAMPLE(?image), \"\") AS ?imageValue)
+                (COALESCE(SAMPLE(?rating), 0) AS ?ratingValue)
+                (COALESCE(SAMPLE(?votes), 0) AS ?votesValue)
                 (GROUP_CONCAT(DISTINCT ?role; separator='|') AS ?roles)
             WHERE {
                 { ?s schema:actor <$uri> . BIND('actor' AS ?role) }
@@ -1279,12 +1463,12 @@ class ShowController extends Controller
         $shows = array_map(fn ($r) => [
             'id'               => $r['id'],
             'name'             => $r['nameValue'],
-            'aggregateRating'  => isset($r['ratingValue']) ? (float) $r['ratingValue'] : 0,
-            'interactionCount' => isset($r['votesValue']) ? (int) $r['votesValue'] : 0,
+            'aggregateRating'  => (float) $r['ratingValue'],
+            'interactionCount' => (int) $r['votesValue'],
             'startDate'        => $r['startDateValue'] ?? null,
             'endDate'          => $r['endDateValue'] ?? null,
-            'image'            => $r['imageValue'] ?? '',
-            'roles'            => self::labels($r['roles'] ?? null),
+            'image'            => $r['imageValue'],
+            'roles'            => self::labels($r['roles']),
         ], $rows);
 
         return view('person', [
@@ -1300,34 +1484,51 @@ class ShowController extends Controller
         $uri  = self::SERIES_NS . $id;  // subjek di triplestore
         $imdb = "https://www.imdb.com/title/{$id}/"; // untuk tombol "View on IMDb"
 
-        // Properti series yang dipakai halaman ini saja, dipilih di graf berdasarkan nama lokal predikat.
-        // Kunci, slug entitas, label (fallback dari IRI), dan durasi (menit) dihitung di SPARQL.
-        $keys = implode(', ', array_map(
-            fn ($k) => self::sparqlStr($k),
-            array_merge(self::LINKED_KEYS, self::DETAIL_KEYS)
+        // Properti series yang dipakai halaman ini, dipilih lewat VALUES (?p ?key) berisi IRI predikat
+        // penuh (PRED_MAP), jadi tidak ada lagi REPLACE + FILTER(?key IN ...) atas seluruh triple subjek
+        // dan predikat bernama lokal sama dari namespace lain tidak ikut tercampur.
+        // Satu baris per key: semua nilainya digabung lewat GROUP_CONCAT (DISTINCT, pemisah karakter
+        // kontrol). Relasi entitas dikirim sebagai "slug<US>label"; durasi (menit) dan label fallback
+        // dari IRI dihitung di SPARQL (REGEX).
+        $rs       = '\u001E';   // escape SPARQL untuk ITEM_SEP
+        $us       = '\u001F';   // escape SPARQL untuk PART_SEP
+        $values   = implode(' ', array_map(
+            fn ($m) => "({$m[0]} " . self::sparqlStr($m[1]) . ')',
+            self::PRED_MAP
         ));
-        $dur  = self::minutesExpr('?o');
+        $linkedIn = implode(', ', array_map(fn ($k) => self::sparqlStr($k), self::LINKED_KEYS));
+        $dur      = self::minutesExpr('?o');
         $rows = $this->select("
-            SELECT ?key ?val ?lbl ?slug WHERE {
+            SELECT ?key (GROUP_CONCAT(DISTINCT ?item; separator=\"$rs\") AS ?vals)
+            WHERE {
+                VALUES (?p ?key) { $values }
                 <$uri> ?p ?o .
-                BIND(REPLACE(STR(?p), \"^.*[/#]\", \"\") AS ?key)
-                FILTER(?key IN ($keys))
                 OPTIONAL { ?o rdfs:label ?ol . }
                 BIND(IF(?key = \"duration\", STR(COALESCE($dur, 0)), STR(?o)) AS ?val)
                 BIND(COALESCE(STR(?ol), REPLACE(REPLACE(STR(?o), \"^.*[/#]\", \"\"), \"[_-]\", \" \")) AS ?lbl)
                 BIND(REPLACE(STR(?o), \"^.*/\", \"\") AS ?slug)
+                BIND(IF(?key IN ($linkedIn), CONCAT(?slug, \"$us\", ?lbl),
+                        IF(?key = \"inLanguage\", ?lbl, ?val)) AS ?item)
             }
+            GROUP BY ?key
         ");
         abort_if(empty($rows), 404);
 
-        // Rating ada di node terpisah (.../tt0043208/rating)
+        // Rating ada di node terpisah (.../tt0043208/rating). Nilai cadangan (0, 0, 10, 1)
+        // dihitung di SPARQL lewat COALESCE; OPTIONAL membuat query selalu menghasilkan satu baris.
         $ratingRows = $this->select("
-            SELECT ?rating ?votes ?best ?worst WHERE {
-                <$uri> schema:aggregateRating ?r .
-                ?r schema:ratingValue ?rating .
-                OPTIONAL { ?r schema:ratingCount ?votes . }
-                OPTIONAL { ?r schema:bestRating ?best . }
-                OPTIONAL { ?r schema:worstRating ?worst . }
+            SELECT (COALESCE(xsd:decimal(?r0), 0) AS ?rating)
+                   (COALESCE(xsd:integer(?v0), 0) AS ?votes)
+                   (COALESCE(xsd:decimal(?b0), 10) AS ?best)
+                   (COALESCE(xsd:decimal(?w0), 1) AS ?worst)
+            WHERE {
+                OPTIONAL {
+                    <$uri> schema:aggregateRating ?r .
+                    ?r schema:ratingValue ?r0 .
+                    OPTIONAL { ?r schema:ratingCount ?v0 . }
+                    OPTIONAL { ?r schema:bestRating ?b0 . }
+                    OPTIONAL { ?r schema:worstRating ?w0 . }
+                }
             } LIMIT 1
         ");
 
@@ -1346,34 +1547,34 @@ class ShowController extends Controller
         ");
 
         // Penyusunan JSON dari baris hasil query (tanpa logika pemilihan data)
-        $show   = ['id' => $id, 'uri' => $imdb];
+        $show   = ['id' => $id, 'uri' => $imdb, 'inLanguage' => '', 'links' => []];
         $linked = array_fill_keys(self::LINKED_KEYS, []);
-        $langs  = [];
-        $links  = [];
 
         foreach ($rows as $r) {
-            $key = $r['key'];
+            $key   = $r['key'];
+            $items = explode(self::ITEM_SEP, (string) $r['vals']);
             if (in_array($key, self::LINKED_KEYS, true)) {
-                $linked[$key][$r['slug']] = $r['lbl'];
+                foreach ($items as $item) {
+                    [$slug, $name] = array_pad(explode(self::PART_SEP, $item, 2), 2, '');
+                    $linked[$key][$slug] = $name;
+                }
             } elseif ($key === 'inLanguage') {
-                $langs[] = $r['lbl'];
-            } elseif ($key === 'sameAs') { // owl:sameAs & schema:sameAs
-                $links[] = $r['val'];
+                $show['inLanguage'] = implode(', ', $items);
+            } elseif ($key === 'sameAs') { // owl:sameAs & schema:sameAs (sudah DISTINCT di SPARQL)
+                $show['links'] = $items;
             } elseif ($key === 'duration') {
-                $show['duration'] = (int) $r['val'];
+                $show['duration'] = (int) $items[0];
             } else {
-                $show[$key] = $r['val'];
+                $show[$key] = $items[0];
             }
         }
 
-        $show['inLanguage'] = implode(', ', array_unique($langs));
         foreach (self::LINKED_KEYS as $k) {
             $show[$k] = [];
             foreach ($linked[$k] as $slug => $name) {
                 $show[$k][] = ['slug' => (string) $slug, 'name' => $name];
             }
         }
-        $show['links'] = array_values(array_unique($links));
 
         // angka award terstruktur (null = tidak ada angka, mis. teks "See the Top 250...")
         $show['winCount']        = isset($show['winCount']) ? (int) $show['winCount'] : null;
@@ -1384,11 +1585,11 @@ class ShowController extends Controller
             'nominated' => (int) $r['nom'],
         ], $awardRows);
 
-        $rt = $ratingRows[0] ?? [];
-        $show['aggregateRating']  = isset($rt['rating']) ? (float) $rt['rating'] : 0;
-        $show['interactionCount'] = isset($rt['votes']) ? (int) $rt['votes'] : 0;
-        $show['bestRating']       = isset($rt['best']) ? (float) $rt['best'] : 10;
-        $show['worstRating']      = isset($rt['worst']) ? (float) $rt['worst'] : 1;
+        $rt = $ratingRows[0];
+        $show['aggregateRating']  = (float) $rt['rating'];
+        $show['interactionCount'] = (int) $rt['votes'];
+        $show['bestRating']       = (float) $rt['best'];
+        $show['worstRating']      = (float) $rt['worst'];
 
         // Rank = ex:rank dari graf (sama dengan urutan Top Rated); 0 = tidak ada rank
         $show['rank'] = isset($show['rank']) ? (int) $show['rank'] : 0;
