@@ -9,13 +9,28 @@ class SparqlService
     public function query(string $sparql): array
     {
         $response = Http::timeout(15)
-            ->withHeaders(['Accept' => 'application/sparql-results+json'])
+            ->withHeaders([
+                'Accept' => 'application/sparql-results+json'
+            ])
             ->asForm()
-            ->post(config('services.fuseki.endpoint'), ['query' => $sparql])
+            ->post(config('services.fuseki.endpoint'), [
+                'query' => $sparql
+            ])
             ->throw();
 
-        return collect($response->json('results.bindings'))
-            ->map(fn ($row) => collect($row)->map(fn ($v) => $v['value'])->all())
+        $bindings = $response->json('results.bindings');
+
+        if (!is_array($bindings)) {
+            throw new \RuntimeException(
+                'Format respons SPARQL tidak valid.'
+            );
+        }
+
+        return collect($bindings)
+            ->map(fn ($row) => collect($row)
+                ->map(fn ($value) => $value['value'])
+                ->all()
+            )
             ->all();
     }
 
