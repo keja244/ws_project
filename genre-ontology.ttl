@@ -1,59 +1,169 @@
 @prefix : <http://series-tv.com/ontology/> .
+@prefix ex: <http://example.org/tvseries/genre/> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
-@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+<http://series-tv.com/ontology/> a owl:Ontology ;
+    rdfs:label "TV Series Genre Ontology"@en ;
+    rdfs:comment "Ontology genre serial TV yang dipetakan ke genre dataset TV Series."@id .
 
 :Genre a owl:Class ;
-    rdfs:label "Genre Serial TV" .
+    rdfs:label "TV Series Genre"@en ;
+    rdfs:label "Genre Serial TV"@id ;
+    rdfs:comment "Kelas untuk konsep genre serial televisi."@id .
 
-:Horror a :Genre ;
-    skos:prefLabel "Horror" ;
-    skos:altLabel "Horor", "Seram", "Menakutkan" ;
+:Horror a :Genre, skos:Concept ;
+    skos:prefLabel "Horror"@en ;
+    skos:altLabel "Horor"@id, "Seram"@id, "Menakutkan"@id ;
+    skos:exactMatch ex:horror ;
     skos:related :Thriller .
 
-:Thriller a :Genre ;
-    skos:prefLabel "Thriller" ;
-    skos:altLabel "Tegang", "Mencekam", "Suspense" ;
+:Thriller a :Genre, skos:Concept ;
+    skos:prefLabel "Thriller"@en ;
+    skos:altLabel "Tegang"@id, "Mencekam"@id, "Suspense"@en ;
+    skos:exactMatch ex:thriller ;
     skos:related :Mystery .
 
-:Mystery a :Genre ;
-    skos:prefLabel "Mystery" ;
-    skos:altLabel "Misteri", "Teka-teki" ;
+:Mystery a :Genre, skos:Concept ;
+    skos:prefLabel "Mystery"@en ;
+    skos:altLabel "Misteri"@id, "Teka-teki"@id ;
+    skos:exactMatch ex:mystery ;
     skos:related :Crime .
 
-:Crime a :Genre ;
-    skos:prefLabel "Crime" ;
-    skos:altLabel "Kriminal", "Kejahatan" ;
+:Crime a :Genre, skos:Concept ;
+    skos:prefLabel "Crime"@en ;
+    skos:altLabel "Kriminal"@id, "Kejahatan"@id ;
+    skos:exactMatch ex:crime ;
     skos:related :Mystery .
 
-:Comedy a :Genre ;
-    skos:prefLabel "Comedy" ;
-    skos:altLabel "Komedi", "Lucu", "Humor" .
+:Comedy a :Genre, skos:Concept ;
+    skos:prefLabel "Comedy"@en ;
+    skos:altLabel "Komedi"@id, "Lucu"@id, "Humor"@id ;
+    skos:exactMatch ex:comedy .
 
-:Drama a :Genre ;
-    skos:prefLabel "Drama" .
+:Drama a :Genre, skos:Concept ;
+    skos:prefLabel "Drama"@en ;
+    skos:altLabel "Kisah dramatis"@id ;
+    skos:exactMatch ex:drama .
 
-:Action a :Genre ;
-    skos:prefLabel "Action" ;
-    skos:altLabel "Aksi" .
+:Action a :Genre, skos:Concept ;
+    skos:prefLabel "Action"@en ;
+    skos:altLabel "Aksi"@id, "Laga"@id ;
+    skos:exactMatch ex:action ;
+    skos:related :Adventure .
 
-:Romance a :Genre ;
-    skos:prefLabel "Romance" ;
-    skos:altLabel "Romansa", "Romantis" .
+:Romance a :Genre, skos:Concept ;
+    skos:prefLabel "Romance"@en ;
+    skos:altLabel "Romansa"@id, "Romantis"@id ;
+    skos:exactMatch ex:romance .
 
-:Fantasy a :Genre ;
-    skos:prefLabel "Fantasy" ;
-    skos:altLabel "Fantasi" .
+:Fantasy a :Genre, skos:Concept ;
+    skos:prefLabel "Fantasy"@en ;
+    skos:altLabel "Fantasi"@id ;
+    skos:exactMatch ex:fantasy ;
+    skos:related :SciFi .
 
-:Animation a :Genre ;
-    skos:prefLabel "Animation" ;
-    skos:altLabel "Animasi", "Kartun" .
+:Animation a :Genre, skos:Concept ;
+    skos:prefLabel "Animation"@en ;
+    skos:altLabel "Animasi"@id, "Kartun"@id .
 
-:SciFi a :Genre ;
-    skos:prefLabel "Science Fiction" ;
-    skos:altLabel "Sci-Fi", "Fiksi ilmiah" .
+:SciFi a :Genre, skos:Concept ;
+    skos:prefLabel "Science Fiction"@en ;
+    skos:altLabel "Sci-Fi"@en, "Fiksi ilmiah"@id ;
+    skos:exactMatch ex:sci-fi ;
+    skos:related :Fantasy .
 
-:Documentary a :Genre ;
-    skos:prefLabel "Documentary" ;
-    skos:altLabel "Dokumenter" .
+:Documentary a :Genre, skos:Concept ;
+    skos:prefLabel "Documentary"@en ;
+    skos:altLabel "Dokumenter"@id ;
+    skos:exactMatch ex:documentary .
+
+:Adventure a :Genre, skos:Concept ;
+    skos:prefLabel "Adventure"@en ;
+    skos:altLabel "Petualangan"@id ;
+    skos:exactMatch ex:adventure ;
+    skos:related :Action .
+
+:Biography a :Genre, skos:Concept ;
+    skos:prefLabel "Biography"@en ;
+    skos:altLabel "Biografi"@id ;
+    skos:exactMatch ex:biography .
+
+:Family a :Genre, skos:Concept ;
+    skos:prefLabel "Family"@en ;
+    skos:altLabel "Keluarga"@id ;
+    skos:exactMatch ex:family .
+
+:GameShow a :Genre, skos:Concept ;
+    skos:prefLabel "Game-Show"@en ;
+    skos:altLabel "Acara permainan"@id, "Kuis"@id ;
+    skos:exactMatch ex:game-show .
+
+:History a :Genre, skos:Concept ;
+    skos:prefLabel "History"@en ;
+    skos:altLabel "Sejarah"@id ;
+    skos:exactMatch ex:history .
+
+:Kids a :Genre, skos:Concept ;
+    skos:prefLabel "Kids"@en ;
+    skos:altLabel "Anak-anak"@id ;
+    skos:exactMatch ex:kids .
+
+:Music a :Genre, skos:Concept ;
+    skos:prefLabel "Music"@en ;
+    skos:altLabel "Musik"@id ;
+    skos:exactMatch ex:music ;
+    skos:related :Musical .
+
+:Musical a :Genre, skos:Concept ;
+    skos:prefLabel "Musical"@en ;
+    skos:altLabel "Drama musikal"@id ;
+    skos:exactMatch ex:musical ;
+    skos:related :Music .
+
+:News a :Genre, skos:Concept ;
+    skos:prefLabel "News"@en ;
+    skos:altLabel "Berita"@id ;
+    skos:exactMatch ex:news .
+
+:Politics a :Genre, skos:Concept ;
+    skos:prefLabel "Politics"@en ;
+    skos:altLabel "Politik"@id ;
+    skos:exactMatch ex:politics .
+
+:RealityTV a :Genre, skos:Concept ;
+    skos:prefLabel "Reality-TV"@en ;
+    skos:altLabel "Acara realitas"@id, "Televisi realitas"@id ;
+    skos:exactMatch ex:reality-tv .
+
+:Short a :Genre, skos:Concept ;
+    skos:prefLabel "Short"@en ;
+    skos:altLabel "Film pendek"@id, "Serial pendek"@id ;
+    skos:exactMatch ex:short .
+
+:Soap a :Genre, skos:Concept ;
+    skos:prefLabel "Soap"@en ;
+    skos:altLabel "Sinetron"@id, "Drama serial"@id ;
+    skos:exactMatch ex:soap .
+
+:Sport a :Genre, skos:Concept ;
+    skos:prefLabel "Sport"@en ;
+    skos:altLabel "Olahraga"@id ;
+    skos:exactMatch ex:sport .
+
+:TalkShow a :Genre, skos:Concept ;
+    skos:prefLabel "Talk-Show"@en ;
+    skos:altLabel "Acara bincang-bincang"@id, "Gelak wicara"@id ;
+    skos:exactMatch ex:talk-show .
+
+:War a :Genre, skos:Concept ;
+    skos:prefLabel "War"@en ;
+    skos:altLabel "Perang"@id ;
+    skos:exactMatch ex:war .
+
+:Western a :Genre, skos:Concept ;
+    skos:prefLabel "Western"@en ;
+    skos:altLabel "Film koboi"@id ;
+    skos:exactMatch ex:western .
