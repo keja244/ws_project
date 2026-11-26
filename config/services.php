@@ -5,6 +5,12 @@ return [
         'endpoint' => env('FUSEKI_ENDPOINT'),
     ],
 
+    'wikidata' => [
+        'endpoint'   => env('WIKIDATA_ENDPOINT', 'https://query.wikidata.org/sparql'),
+        'user_agent' => env('WIKIDATA_USER_AGENT', 'ITVSemanticApp/1.0 (https://example.org)'),
+        'timeout'    => (int) env('WIKIDATA_TIMEOUT', 8),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],
