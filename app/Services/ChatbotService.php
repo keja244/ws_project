@@ -4,6 +4,10 @@ namespace App\Services;
 
 class ChatbotService
 {
+    public function __construct(
+        private SparqlService $sparql
+    ) {}
+
     private const ASIAN_COUNTRIES = [
         'china', 'hong kong', 'india', 'indonesia', 'japan', 'malaysia',
         'philippines', 'singapore', 'south korea', 'taiwan', 'thailand', 'vietnam',
@@ -49,6 +53,7 @@ class ChatbotService
         $query = $this->normalizeQuery($message);
         $shows = $this->uniqueShows($shows);
         $state = $this->normalizeState($state);
+                
         if ($this->isPromptInjection($query)) {
             return [
                 'answer' => 'Aku tidak bisa mengikuti instruksi untuk mengubah aturan atau membuka data internal. Aku tetap bisa bantu mencari serial dari katalog SeriesTV.',
@@ -57,6 +62,20 @@ class ChatbotService
                 'state' => $state,
             ];
         }
+
+        // Kenali keluhan atau koreksi dari pengguna.
+        if (preg_match(
+            '/\b(?:kamu salah|anda salah|bukan itu yang (?:saya|aku) maksud|hasil(?:nya)? tidak sesuai|jawaban(?:mu| anda)? (?:salah|kurang tepat)|salah memahami|tidak sesuai harapan|rekomendasi(?:mu| anda)? (?:salah|tidak sesuai))\b/u',
+            $query
+        )) {
+            return [
+                'answer' => 'Maaf, sepertinya aku salah memahami permintaanmu atau memberikan hasil yang kurang sesuai. Bisa jelaskan bagian mana yang perlu diperbaiki? Aku akan mencoba menyesuaikannya.',
+                'shows' => [],
+                'searchUrl' => null,
+                'state' => $state,
+            ];
+        }
+
         $premiseTitle = $this->findPremiseTitle($query, $shows);
         $unknownTitle = $this->findUnknownTitleCandidate($query, $shows);
 
@@ -99,7 +118,16 @@ class ChatbotService
         }
 
         $popularityIntent = preg_match('/\b(?:terkenal|populer|popular|famous|well-known)\b/u', $query) === 1;
-        $keepActiveFilters = preg_match('/\b(?:lanjutkan|pakai|gunakan|terapkan)\b.{0,50}\bfilter aktif\b/u', $query) === 1;
+
+        $continuationIntent = preg_match(
+            '/\b(?:naikkan|turunkan|ubah|ganti|tambahkan|tambah|hapus|hilangkan|kurangi|lanjutkan|pertahankan|tetap|jangan|pakai|gunakan|terapkan)\b/u',
+            $query
+        ) === 1;
+
+        $keepActiveFilters = preg_match(
+            '/\b(?:lanjutkan|pakai|gunakan|terapkan)\b.{0,50}\bfilter aktif\b/u',
+            $query
+        ) === 1;
         $globalPopularity = preg_match('/\b(?:secara global|global|tanpa filter|reset dan cari global)\b/u', $query) === 1;
         if ($globalPopularity) {
             $state = $this->emptyState();
@@ -199,6 +227,7 @@ class ChatbotService
         $ratingConstraint = $this->findRating($query);
         $rating = $ratingConstraint['value'];
         $ratingExclusive = $ratingConstraint['exclusive'];
+        $ratingMaximum = $ratingConstraint['maximum'];
         $ratingWasDefault = ! empty($ratingConstraint['default']);
         if ($popularityIntent && $ratingWasDefault) {
             $rating = null;
@@ -229,7 +258,20 @@ class ChatbotService
         $similarIntent = preg_match('/\b(?:mirip|seperti|similar|like|vibe|nuansa)\b/u', $query) === 1;
         $similarReference = $similarIntent ? $this->findSimilarityReference($query) : null;
         $mentionedActors = $this->findMentionedActors($query, $shows);
+        $actorIntent = preg_match('/\b(?:aktor|aktris|pemeran|dibintangi|dibintangi oleh|cast|starring|starred)\b/u', $query) === 1;
         $excludedTitles = $this->findExcludedTitles($query, $shows);
+
+        if ($actorIntent && ! $mentionedActors) {
+            return [
+                'answer' => 'Maaf, aktor yang kamu cari tidak ditemukan di katalog serial.',
+                'shows' => [],
+                'moreShows' => [],
+                'relatedGenres' => [],
+                'relatedShows' => [],
+                'searchUrl' => null,
+                'state' => $state,
+            ];
+        }
 
         if ($title && $excludedTitles && preg_match('/\b(?:pemeran|aktor|aktris|cast)\b.{0,60}\b(?:sama|serupa)\b|\b(?:sama|serupa)\b.{0,50}\b(?:pemeran|aktor|aktris|cast)\b/u', $query)) {
             return array_merge(
@@ -364,14 +406,27 @@ class ChatbotService
             ];
         }
 
-        if (! $keepActiveFilters && ($plotIntent || $this->shouldStartFreshSearch($query, $state, $genres, $title, $similarIntent))) {
+        $isNewFilterSearch = preg_match(
+            '/\b(?:cari|carikan|rekomendasikan|rekomendasi|tampilkan|tunjukkan|aku mau|saya mau|film|serial|series)\b/u',
+            $query
+        ) === 1;
+
+        if (
+            ! $keepActiveFilters
+            && ! $continuationIntent
+            && (
+                $plotIntent
+                || $isNewFilterSearch
+                || $this->shouldStartFreshSearch($query, $state, $genres, $title, $similarIntent)
+            )
+        ) {
             $state = $this->emptyState();
         }
         $sort = $this->findSort($query) ?? $state['sort'];
         $ambiguousPopularity = $popularityIntent
             && ! preg_match('/\b(?:urutkan|urutin|sortir)\b.{0,30}\b(?:rating|vote|suara|penilaian)\b|\b(?:jumlah|banyak)\s+(?:vote|suara|penilaian)\b/u', $query);
         $state = $this->mergeState($state, compact(
-            'genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'year', 'yearInclusive',
+            'genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'ratingMaximum', 'year', 'yearInclusive',
             'yearMax', 'yearMaxInclusive', 'seasonRange', 'episodeMax', 'endedOnly', 'westernOnly', 'durationMax',
             'shortEpisodes', 'familyFriendly', 'sort'
         ), $query);
@@ -449,10 +504,114 @@ class ChatbotService
             ];
         }
 
-        $filters = compact('genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'year', 'yearInclusive', 'yearMax', 'yearMaxInclusive', 'seasonRange', 'episodeMax', 'endedOnly', 'westernOnly', 'shortEpisodes', 'durationMax', 'familyFriendly');
-        $filters['excludeTitles'] = array_map(fn (array $show) => (string) ($show['id'] ?? ''), $excludedTitles);
-        $matches = array_values(array_filter($shows, fn (array $show) => $this->matchesFilters($show, $filters)));
 
+        $filters = compact('genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'ratingMaximum', 'year', 'yearInclusive', 'yearMax', 'yearMaxInclusive', 'seasonRange', 'episodeMax', 'endedOnly', 'westernOnly', 'shortEpisodes', 'durationMax', 'familyFriendly');
+
+        $filters['actors'] = $mentionedActors;
+
+        $filters['excludeTitles'] = array_map(
+            fn (array $show) => (string) ($show['id'] ?? ''),
+            $excludedTitles
+        );
+
+
+        $relatedMatches = [];
+        $relatedGenres = [];
+
+        $matches = array_values(array_filter(
+        $shows,
+        fn (array $show) => $this->matchesFilters($show, $filters)
+    ));
+
+        if ($genres) {
+        try {
+            $semanticResults = $this->searchSemanticGenre($genres, $genreMode);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return [
+                'answer' => 'Maaf, layanan pencarian semantik sedang tidak tersedia. Silakan coba lagi beberapa saat.',
+                'shows' => [],
+                'moreShows' => [],
+                'relatedGenres' => [],
+                'relatedShows' => [],
+                'searchUrl' => null,
+                'state' => $state,
+            ];
+        }
+
+        $relatedGenres = $this->getRelatedSemanticGenres($genres);
+
+            if ($excludeGenres) {
+            $relatedGenres = array_values(array_filter(
+                $relatedGenres,
+                fn (string $genre) => ! in_array(
+                    mb_strtolower($genre),
+                    array_map('mb_strtolower', $excludeGenres),
+                    true
+                )
+            ));
+        }
+
+            $semanticIds = array_map(
+            fn (array $row) => trim($row['id'] ?? ''),
+            $semanticResults
+        );
+
+        $genreShows = array_values(array_filter(
+            $shows,
+            fn (array $show) => in_array(
+                trim((string) ($show['id'] ?? '')),
+                $semanticIds,
+                true
+            )
+        ));
+
+            $filtersWithoutGenres = $filters;
+            $filtersWithoutGenres['genres'] = [];
+
+            $matches = array_values(array_filter(
+                $genreShows,
+                fn (array $show) => $this->matchesFilters($show, $filtersWithoutGenres)
+            ));
+            $relatedMatches = [];
+
+            if ($relatedGenres) {
+            try {
+                $relatedResults = $this->searchSemanticGenre($relatedGenres, 'or');
+            } catch (\Throwable $e) {
+                report($e);
+                $relatedResults = [];
+            }
+
+                $relatedIds = array_map(
+                fn (array $row) => trim($row['id'] ?? ''),
+                $relatedResults
+            );
+                $mainIds = array_map(
+                    fn (array $show) => (string) ($show['id'] ?? ''),
+                    $matches
+                );
+
+                $relatedShows = array_values(array_filter(
+                $shows,
+                fn (array $show) =>
+                    in_array(
+                        trim((string) ($show['id'] ?? '')),
+                        $relatedIds,
+                        true
+                    )
+                    && ! in_array((string) ($show['id'] ?? ''), $mainIds, true)
+            ));
+
+                $relatedMatches = array_values(array_filter(
+                    $relatedShows,
+                    fn (array $show) => $this->matchesFilters($show, $filtersWithoutGenres)
+                ));
+
+                $this->sortShows($relatedMatches, $sort, $moods);
+            }
+        }
         if ($title && ! $similarIntent) {
             $matches = array_values(array_filter($matches, fn (array $show) => ($show['id'] ?? null) === ($title['id'] ?? null)));
         }
@@ -474,7 +633,10 @@ class ChatbotService
 
         $hadNoStrictMatches = $matches === [];
         $results = array_slice($matches, 0, 9);
-        $criteria = $this->criteria($genres, $excludeGenres, $genreMode, $platform, $excludePlatform, $country, $excludeCountry, $rating, $ratingExclusive, $year, $yearInclusive, $yearMax, $yearMaxInclusive, $seasonRange, $episodeMax, $endedOnly, $westernOnly, $shortEpisodes, $durationMax, $moods);
+        $criteria = $this->criteria($genres, $excludeGenres, $genreMode, $platform, $excludePlatform, $country, $excludeCountry, $rating, $ratingExclusive, $ratingMaximum, $year, $yearInclusive, $yearMax, $yearMaxInclusive, $seasonRange, $episodeMax, $endedOnly, $westernOnly, $shortEpisodes, $durationMax, $moods);
+        if ($mentionedActors) {
+            array_unshift($criteria, 'aktor '.implode(', ', $mentionedActors));
+        }
         if ($familyFriendly) {
             array_unshift($criteria, 'ramah keluarga');
         }
@@ -569,13 +731,23 @@ class ChatbotService
                 : $this->reasonFor($show, $criteria, $similarIntent ? $title : null, $moods))
         );
 
+        $toRelatedCard = fn (array $show): array => $this->card(
+        $show,
+        'Direkomendasikan karena genre terkait: '.implode(', ', $relatedGenres)
+    );
+
         return array_merge([
-            'answer' => $answer,
-            'shows' => array_map($toCard, array_slice($results, 0, 4)),
-            'moreShows' => array_map($toCard, array_slice($results, 4, 5)),
-            'searchUrl' => $searchUrl,
-            'state' => $state,
-        ], $extras);
+        'answer' => $answer,
+        'shows' => array_map($toCard, array_slice($results, 0, 4)),
+        'moreShows' => array_map($toCard, array_slice($results, 4, 5)),
+        'relatedGenres' => $relatedGenres,
+        'relatedShows' => array_map(
+            $toRelatedCard,
+            array_slice($relatedMatches, 0, 5)
+        ),
+        'searchUrl' => $searchUrl,
+        'state' => $state,
+    ], $extras);
     }
 
     private function isPromptInjection(string $query): bool
@@ -611,6 +783,7 @@ class ChatbotService
             'excludeCountry' => [],
             'rating' => null,
             'ratingExclusive' => false,
+            'ratingMaximum' => false,
             'year' => null,
             'yearInclusive' => true,
             'yearMax' => null,
@@ -718,6 +891,7 @@ class ChatbotService
         if ($parsed['rating'] !== null) {
             $state['rating'] = $parsed['rating'];
             $state['ratingExclusive'] = $parsed['ratingExclusive'];
+            $state['ratingMaximum'] = $parsed['ratingMaximum'];
         }
         if ($parsed['year'] !== null || $parsed['yearMax'] !== null) {
             $state['year'] = $parsed['year'];
@@ -923,7 +1097,9 @@ class ChatbotService
             $filters[] = 'asal '.implode('/', $state['country']);
         }
         if ($state['rating'] !== null) {
-            $filters[] = ($state['ratingExclusive'] ? 'rating di atas ' : 'rating minimal ').$state['rating'];
+            $filters[] = $state['ratingMaximum']
+            ? 'rating maksimal '.$state['rating']
+            : ($state['ratingExclusive'] ? 'rating di atas ' : 'rating minimal ').$state['rating'];
         }
         if ($state['platform']) {
             $filters[] = 'platform '.$state['platform'];
@@ -1080,19 +1256,44 @@ class ChatbotService
         return null;
     }
 
+    
     private function findMentionedActors(string $query, array $shows): array
     {
         $mentioned = [];
+
+        // Samakan format nama aktor dan pesan pengguna.
+        $normalizedQuery = preg_replace('/[-_]+/u', ' ', $query) ?? $query;
+        $normalizedQuery = preg_replace('/\s+/', ' ', $normalizedQuery);
+        $normalizedQuery = trim($normalizedQuery);
+
         foreach ($shows as $show) {
             foreach ($this->list((string) ($show['actor'] ?? '')) as $actor) {
-                if ($actor !== '' && preg_match('/(?<![\pL\pN])'.preg_quote(mb_strtolower($actor), '/').'(?![\pL\pN])/u', $query)) {
-                    $mentioned[mb_strtolower($actor)] = $actor;
+                $actor = trim($actor);
+
+                if ($actor === '') {
+                    continue;
+                }
+
+                $normalizedActor = mb_strtolower($actor);
+                $normalizedActor = preg_replace('/[-_]+/u', ' ', $normalizedActor) ?? $normalizedActor;
+                $normalizedActor = preg_replace('/\s+/', ' ', $normalizedActor);
+                $normalizedActor = trim($normalizedActor);
+
+                if (
+                    $normalizedActor !== ''
+                    && preg_match(
+                        '/(?<![\pL\pN])'.preg_quote($normalizedActor, '/').'(?![\pL\pN])/u',
+                        $normalizedQuery
+                    )
+                ) {
+                    $mentioned[$normalizedActor] = $actor;
                 }
             }
         }
 
         return array_values($mentioned);
     }
+
 
     private function findExcludedTitles(string $query, array $shows): array
     {
@@ -1292,6 +1493,16 @@ class ChatbotService
             'bikin tegang' => 'thriller', 'yang lucu' => 'comedy',
         ];
         $found = [];
+        $ontologyAliases = $this->getOntologyGenreAliases();
+
+        foreach ($ontologyAliases as $alias => $genre) {
+            if (preg_match('/(?<![\pL\pN])'.preg_quote($alias, '/').'(?![\pL\pN])/u', $query)) {
+                $genreKey = mb_strtolower($genre);
+                $matchedGenre = $available[$genreKey] ?? $genre;
+
+                $found[mb_strtolower($matchedGenre)] = $matchedGenre;
+            }
+        }
         foreach ($aliases as $alias => $genre) {
             if (preg_match('/(?<![\pL\pN])'.preg_quote($alias, '/').'(?![\pL\pN])/u', $query)) {
                 $found[mb_strtolower($available[$genre] ?? ucfirst($genre))] = $available[$genre] ?? ucfirst($genre);
@@ -1339,7 +1550,20 @@ class ChatbotService
             }
         }
 
-        return array_values($found);
+        $normalized = [];
+
+        foreach ($found as $genre) {
+            $key = mb_strtolower(trim($genre));
+
+            if (in_array($key, ['sci-fi', 'science fiction', 'scifi'], true)) {
+                $normalized['science fiction'] = 'Science Fiction';
+                continue;
+            }
+
+            $normalized[$key] = $genre;
+        }
+
+        return array_values($normalized);
     }
 
     private function findExcludedGenres(string $query, array $shows): array
@@ -1473,32 +1697,64 @@ class ChatbotService
         return [];
     }
 
-    private function findRating(string $query): array
-    {
-        $number = '(\\d+(?:[.,]\\d+)?)(?!\\s*(?:season|seasons|musim|tahun|episode|episodes|menit|minutes|min\\b))';
-        if (preg_match('/(?:rating|nilai|imdb)[^\\d]{0,25}'.$number.'/u', $query, $match)) {
+    
+    
+        private function findRating(string $query): array
+        {
+            $number = '(\\d+(?:[.,]\\d+)?)';
+
+            // Rating minimal
+            if (preg_match('/(?:rating|nilai|imdb)\s*(?:minimal|minimum|paling sedikit|setidaknya|at least|>=)\s*'.$number.'/u', $query, $match)
+                || preg_match('/(?:minimal|minimum|paling sedikit|setidaknya|at least|>=)\s*(?:rating\s*)?'.$number.'/u', $query, $match)) {
+                return [
+                    'value' => (float) str_replace(',', '.', $match[1]),
+                    'exclusive' => false,
+                    'maximum' => false,
+                    'default' => false,
+                ];
+            }
+
+            // Rating di atas
+            if (preg_match('/(?:rating|nilai|imdb)\s*(?:di atas|lebih dari|above|over|greater than|>)\s*'.$number.'/u', $query, $match)
+                || preg_match('/(?:di atas|lebih dari|above|over|greater than|>)\s*(?:rating\s*)?'.$number.'/u', $query, $match)) {
+                return [
+                    'value' => (float) str_replace(',', '.', $match[1]),
+                    'exclusive' => true,
+                    'maximum' => false,
+                    'default' => false,
+                ];
+            }
+
+            // Rating maksimal
+            if (preg_match('/(?:rating|nilai|imdb)\s*(?:maksimal|maksimum|paling banyak|at most|up to|<=)\s*'.$number.'/u', $query, $match)
+                || preg_match('/(?:maksimal|maksimum|paling banyak|at most|up to|<=)\s*(?:rating\s*)?'.$number.'/u', $query, $match)) {
+                return [
+                    'value' => (float) str_replace(',', '.', $match[1]),
+                    'exclusive' => false,
+                    'maximum' => true,
+                    'default' => false,
+                ];
+            }
+
+            // Rating bagus atau tinggi
+            if (preg_match('/\b(?:rating(?:nya)?|nilai|imdb)\b.{0,20}\b(?:bagus|baik|tinggi|good|high)\b/u', $query)) {
+                return [
+                    'value' => 8.0,
+                    'exclusive' => false,
+                    'maximum' => false,
+                    'default' => true,
+                ];
+            }
+
             return [
-                'value' => (float) str_replace(',', '.', $match[1]),
-                'exclusive' => (bool) preg_match('/(?:di atas|lebih dari|above|over|greater than|>)/u', $match[0]),
+                'value' => null,
+                'exclusive' => false,
+                'maximum' => false,
                 'default' => false,
             ];
-        }
-        if (preg_match('/(?:di atas|lebih dari|above|over|greater than|at least|minimal|>=|>)\\s*(?:rating\\s*)?'.$number.'/u', $query, $match)) {
-            return [
-                'value' => (float) str_replace(',', '.', $match[1]),
-                'exclusive' => (bool) preg_match('/(?:di atas|lebih dari|above|over|greater than|>)/u', $match[0]),
-                'default' => false,
-            ];
-        }
-        if (preg_match('/\\b'.$number.'\\s*(?:ke atas|and above|\\+)/u', $query, $match)) {
-            return ['value' => (float) str_replace(',', '.', $match[1]), 'exclusive' => false, 'default' => false];
-        }
-        if (preg_match('/\b(?:rating(?:nya)?|nilai|imdb)\b.{0,20}\b(?:bagus|baik|tinggi|good|high)\b/u', $query)) {
-            return ['value' => 8.0, 'exclusive' => false, 'default' => true];
         }
 
-        return ['value' => null, 'exclusive' => false, 'default' => false];
-    }
+
 
     private function findDurationLimit(string $query): ?int
     {
@@ -1566,6 +1822,21 @@ class ChatbotService
             return false;
         }
         $showGenres = array_map('mb_strtolower', $this->list($show['genre'] ?? ''));
+        $showActors = array_map(
+            fn (string $actor) => mb_strtolower(trim($actor)),
+            $this->list($show['actor'] ?? '')
+        );
+
+        if (! empty($filters['actors'])) {
+            $actorMatches = array_map(
+                fn (string $actor) => mb_strtolower(trim($actor)),
+                $filters['actors']
+            );
+
+            if (! array_intersect($actorMatches, $showActors)) {
+                return false;
+            }
+        }
         // §8.1: dukung AND (default) atau OR saat pengguna menulis "atau/or".
         if (! empty($filters['genres'])) {
             $hits = 0;
@@ -1598,7 +1869,12 @@ class ChatbotService
         }
         if ($filters['rating'] !== null) {
             $showRating = (float) ($show['aggregateRating'] ?? 0);
-            if ($filters['ratingExclusive'] ? $showRating <= $filters['rating'] : $showRating < $filters['rating']) {
+
+            if ($filters['ratingMaximum']) {
+                if ($showRating > $filters['rating']) {
+                    return false;
+                }
+            } elseif ($filters['ratingExclusive'] ? $showRating <= $filters['rating'] : $showRating < $filters['rating']) {
                 return false;
             }
         }
@@ -1660,7 +1936,7 @@ class ChatbotService
         };
         $working = $filters;
 
-        if ($working['rating'] !== null && $working['rating'] > 0.2) {
+        if ($working['rating'] !== null && ! $working['ratingMaximum'] && $working['rating'] > 0.2) {
             $originalRating = (float) $working['rating'];
             for ($threshold = round($originalRating - 0.1, 1); $threshold >= round($originalRating - 0.2, 1); $threshold = round($threshold - 0.1, 1)) {
                 $working['rating'] = $threshold;
@@ -1906,10 +2182,17 @@ class ChatbotService
         ];
         $found = [];
         foreach ($moods as $label => $terms) {
-            if (mb_strpos($query, $label) !== false) {
-                $found[$label] = $terms;
-            }
+        if (
+            $label === 'thriller'
+            && preg_match('/\b(?:jangan|tanpa|hindari|kecuali)\s+(?:genre\s+)?thriller\b/u', $query)
+        ) {
+            continue;
         }
+
+        if (mb_strpos($query, $label) !== false) {
+            $found[$label] = $terms;
+        }
+    }
 
         return $found;
     }
@@ -2037,25 +2320,171 @@ class ChatbotService
         ];
     }
 
-    private function rankSimilar(array $title, array $matches, array $moods): array
-    {
+    
+private function rankSimilar(array $title, array $matches, array $moods): array
+{
+    $id = trim((string) ($title['id'] ?? ''));
+
+    if (! preg_match('/^tt\d+$/', $id)) {
+        return $matches;
+    }
+
+    $uri = 'http://example.org/tvseries/series/'.$id;
+
+    $query = '
+        PREFIX schema: <https://schema.org/>
+        PREFIX : <http://example.org/tvseries/vocab#>
+
+        SELECT ?id
+            (
+                2 * COALESCE(?genreCount, 0) +
+                5 * COALESCE(?actorCount, 0) +
+                COALESCE(?countryCount, 0) +
+                COALESCE(?platformCount, 0)
+                AS ?score
+            )
+        WHERE {
+            ?series a schema:TVSeries .
+
+            FILTER(?series != <'.$uri.'>)
+
+            BIND(
+                REPLACE(STR(?series), "^.*/series/", "")
+                AS ?id
+            )
+
+            OPTIONAL {
+                SELECT ?series (COUNT(DISTINCT ?g) AS ?genreCount)
+                WHERE {
+                    <'.$uri.'> schema:genre ?g .
+                    ?series schema:genre ?g .
+                    FILTER(?series != <'.$uri.'>)
+                }
+                GROUP BY ?series
+            }
+
+            OPTIONAL {
+                SELECT ?series (COUNT(DISTINCT ?a) AS ?actorCount)
+                WHERE {
+                    <'.$uri.'> schema:actor ?a .
+                    ?series schema:actor ?a .
+                    FILTER(?series != <'.$uri.'>)
+                }
+                GROUP BY ?series
+            }
+
+            OPTIONAL {
+                SELECT ?series (COUNT(DISTINCT ?c) AS ?countryCount)
+                WHERE {
+                    <'.$uri.'> schema:countryOfOrigin ?c .
+                    ?series schema:countryOfOrigin ?c .
+                    FILTER(?series != <'.$uri.'>)
+                }
+                GROUP BY ?series
+            }
+
+            OPTIONAL {
+                SELECT ?series (COUNT(DISTINCT ?p) AS ?platformCount)
+                WHERE {
+                    <'.$uri.'> :platform ?p .
+                    ?series :platform ?p .
+                    FILTER(?series != <'.$uri.'>)
+                }
+                GROUP BY ?series
+            }
+
+            FILTER(
+                COALESCE(?genreCount, 0) +
+                COALESCE(?actorCount, 0) +
+                COALESCE(?countryCount, 0) +
+                COALESCE(?platformCount, 0) > 0
+            )
+        }
+        ORDER BY DESC(?score)
+    ';
+
+    try {
+        $rows = $this->sparql->query($query);
+
+        $semanticScores = [];
+
+        foreach ($rows as $row) {
+            $candidateId = trim((string) ($row['id'] ?? ''));
+
+            if ($candidateId !== '') {
+                $semanticScores[$candidateId] = (float) ($row['score'] ?? 0);
+            }
+        }
+
+        if (empty($semanticScores)) {
+            throw new \RuntimeException('Fuseki tidak mengembalikan skor kemiripan.');
+        }
+
+        usort($matches, function (array $a, array $b) use ($semanticScores, $moods): int {
+            $score = function (array $show) use ($semanticScores, $moods): float {
+                $showId = trim((string) ($show['id'] ?? ''));
+
+                return ($semanticScores[$showId] ?? 0)
+                    + $this->moodScore($show, $moods);
+            };
+
+            return ($score($b) <=> $score($a))
+                ?: ((float) ($b['aggregateRating'] ?? 0) <=> (float) ($a['aggregateRating'] ?? 0));
+        });
+
+        return $matches;
+    
+    } catch (\Throwable $e) {
         $anchorGenres = array_map('mb_strtolower', $this->list($title['genre'] ?? ''));
         $anchorCast = array_map('mb_strtolower', $this->list($title['actor'] ?? ''));
-        usort($matches, function (array $a, array $b) use ($anchorGenres, $anchorCast, $moods): int {
-            $score = fn (array $show) => count(array_intersect($anchorGenres, array_map('mb_strtolower', $this->list($show['genre'] ?? '')))) * 2
-                + count(array_intersect($anchorCast, array_map('mb_strtolower', $this->list($show['actor'] ?? '')))) * 3
-                + $this->moodScore($show, $moods);
+        $anchorCountries = array_map('mb_strtolower', $this->list($title['countryOfOrigin'] ?? ''));
+        $anchorPlatforms = array_map('mb_strtolower', $this->list($title['platform'] ?? ''));
 
-            return ($score($b) <=> $score($a)) ?: ((float) ($b['aggregateRating'] ?? 0) <=> (float) ($a['aggregateRating'] ?? 0));
+        usort($matches, function (array $a, array $b) use (
+            $anchorGenres,
+            $anchorCast,
+            $anchorCountries,
+            $anchorPlatforms,
+            $moods
+        ): int {
+            $score = function (array $show) use (
+                $anchorGenres,
+                $anchorCast,
+                $anchorCountries,
+                $anchorPlatforms,
+                $moods
+            ): float {
+                return count(array_intersect(
+                    $anchorGenres,
+                    array_map('mb_strtolower', $this->list($show['genre'] ?? ''))
+                )) * 2
+                + count(array_intersect(
+                    $anchorCast,
+                    array_map('mb_strtolower', $this->list($show['actor'] ?? ''))
+                )) * 5
+                + count(array_intersect(
+                    $anchorCountries,
+                    array_map('mb_strtolower', $this->list($show['countryOfOrigin'] ?? ''))
+                ))
+                + count(array_intersect(
+                    $anchorPlatforms,
+                    array_map('mb_strtolower', $this->list($show['platform'] ?? ''))
+                ))
+                + $this->moodScore($show, $moods);
+            };
+
+            return ($score($b) <=> $score($a))
+                ?: ((float) ($b['aggregateRating'] ?? 0) <=> (float) ($a['aggregateRating'] ?? 0));
         });
 
         return $matches;
     }
+}
 
     private function recommendationAnswer(array $results, array $criteria, ?array $title): string
     {
         if ($title && $results) {
-            return "Kalau suka {$title['name']}, coba serial berikut. Aku mengurutkannya berdasarkan kemiripan genre/pemeran dan rating.";
+            return "Kalau suka {$title['name']}, coba serial berikut. Aku mengurutkannya berdasarkan kemiripan genre, pemeran, negara asal, dan platform.";
         }
         $reason = $criteria ? 'Aku pilih yang cocok dengan '.implode(', ', $criteria) : 'Berikut pilihan dengan rating terbaik di katalog';
 
@@ -2090,7 +2519,7 @@ class ChatbotService
         return 'Rating '.number_format((float) ($show['aggregateRating'] ?? 0), 1);
     }
 
-    private function criteria(array $genres, array $excludeGenres, string $genreMode, ?string $platform, array $excludePlatform, array $country, array $excludeCountry, ?float $rating, bool $ratingExclusive, ?int $year, bool $yearInclusive, ?int $yearMax, bool $yearMaxInclusive, array $seasonRange, ?int $episodeMax, bool $endedOnly, bool $westernOnly, bool $shortEpisodes, ?int $durationMax, array $moods): array
+    private function criteria(array $genres, array $excludeGenres, string $genreMode, ?string $platform, array $excludePlatform, array $country, array $excludeCountry, ?float $rating, bool $ratingExclusive, bool $ratingMaximum, ?int $year, bool $yearInclusive, ?int $yearMax, bool $yearMaxInclusive, array $seasonRange, ?int $episodeMax, bool $endedOnly, bool $westernOnly, bool $shortEpisodes, ?int $durationMax, array $moods): array
     {
         $criteria = [];
         if ($genres) {
@@ -2115,7 +2544,9 @@ class ChatbotService
             $criteria[] = 'bukan asal '.implode('/', $excludeCountry);
         }
         if ($rating !== null) {
-            $criteria[] = $ratingExclusive ? "rating di atas {$rating}" : "rating minimal {$rating}";
+            $criteria[] = $ratingMaximum
+                ? "rating maksimal {$rating}"
+                : ($ratingExclusive ? "rating di atas {$rating}" : "rating minimal {$rating}");
         }
         if ($year !== null && $yearMax !== null) {
             $criteria[] = $yearInclusive ? 'rilis mulai '.$year : 'rilis setelah '.$year;
@@ -2219,5 +2650,153 @@ class ChatbotService
         $right = array_map('mb_strtolower', $right);
 
         return (bool) array_intersect($left, $right);
+    }
+    
+
+private function searchSemanticGenre(array $genres, string $mode = 'and'): array
+{
+    if (empty($genres)) {
+        return [];
+    }
+
+    $genreFilters = [];
+
+    foreach ($genres as $index => $genre) {
+        $genre = SparqlService::esc(mb_strtolower(trim($genre)));
+
+        $genreFilters[] = '
+            EXISTS {
+                ?ontologyGenre'.$index.' a :Genre ;
+                    skos:prefLabel ?label'.$index.' ;
+                    skos:exactMatch ?datasetGenre'.$index.' .
+
+                FILTER(
+                    LCASE(STR(?label'.$index.')) = "'.$genre.'"
+                )
+
+                ?series schema:genre ?datasetGenre'.$index.' .
+            }
+        ';
+    }
+
+    $filter = implode(
+        $mode === 'or' ? ' || ' : ' && ',
+        $genreFilters
+    );
+
+    $query = '
+        PREFIX : <http://series-tv.com/ontology/>
+        PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+        PREFIX schema: <https://schema.org/>
+
+        SELECT DISTINCT ?id ?name
+        WHERE {
+            ?series a schema:TVSeries ;
+                    schema:name ?name .
+
+            BIND(
+                REPLACE(STR(?series), "^.*/series/", "")
+                AS ?id
+            )
+
+            FILTER('.$filter.')
+        }
+    ';
+
+    return $this->sparql->query($query);
+}
+
+
+    private function getRelatedSemanticGenres(array $genres): array
+    {
+        if (empty($genres)) {
+            return [];
+        }
+
+        $genreValues = [];
+
+        foreach ($genres as $genre) {
+            $genre = SparqlService::esc(mb_strtolower(trim($genre)));
+
+            $genreValues[] = '"'.$genre.'"';
+        }
+
+        $values = implode(', ', $genreValues);
+
+        $query = '
+            PREFIX : <http://series-tv.com/ontology/>
+            PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+            SELECT DISTINCT ?relatedLabel
+            WHERE {
+                ?genre a :Genre ;
+                    skos:prefLabel ?label ;
+                    skos:related ?related .
+
+                ?related skos:prefLabel ?relatedLabel .
+
+                FILTER(LCASE(STR(?label)) IN ('.$values.'))
+            }
+        ';
+
+        try {
+            $results = $this->sparql->query($query);
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        $requestedGenres = array_fill_keys(
+            array_map(
+                fn ($genre) => mb_strtolower(trim($genre)),
+                $genres
+            ),
+            true
+        );
+
+        $relatedGenres = array_map(
+            fn (array $row) => trim($row['relatedLabel'] ?? ''),
+            $results
+        );
+
+        return array_values(array_unique(array_filter(
+            $relatedGenres,
+            fn ($genre) =>
+                $genre !== ''
+                && !isset($requestedGenres[mb_strtolower($genre)])
+        )));
+    }
+
+    private function getOntologyGenreAliases(): array
+    {
+        $query = '
+            PREFIX : <http://series-tv.com/ontology/>
+            PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+            SELECT DISTINCT ?label ?alias
+            WHERE {
+                ?genre a :Genre ;
+                    skos:prefLabel ?label ;
+                    skos:altLabel ?alias .
+            }
+        ';
+
+        try {
+            $results = $this->sparql->query($query);
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        $aliases = [];
+
+        foreach ($results as $row) {
+            $alias = trim($row['alias'] ?? '');
+            $label = trim($row['label'] ?? '');
+
+            if ($alias !== '' && $label !== '') {
+                $aliases[mb_strtolower($alias)] = $label;
+            }
+        }
+
+        return $aliases;
     }
 }

@@ -4,6 +4,7 @@
     const panel = document.getElementById('chatbotPanel');
     const launcher = document.getElementById('chatbotLauncher');
     const closeButton = document.getElementById('chatbotClose');
+    const refreshButton = document.getElementById('chatbotRefresh');
     const form = document.getElementById('chatbotForm');
     const input = document.getElementById('chatbotInput');
     const messages = document.getElementById('chatbotMessages');
@@ -18,7 +19,8 @@
         const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
         return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     };
-    const conversationId = createConversationId();
+    let conversationId = createConversationId();
+    let currentRequestController = null;
 
     const open = (isOpen) => {
         panel.hidden = !isOpen;
@@ -27,6 +29,27 @@
     };
     launcher.addEventListener('click', () => open(panel.hidden));
     closeButton?.addEventListener('click', () => open(false));
+
+        const refreshChat = () => {
+        currentRequestController?.abort();
+        currentRequestController = null;
+
+        conversationId = createConversationId();
+
+        messages.replaceChildren();
+
+        const welcome = document.createElement('div');
+        welcome.className = 'chatbot__bubble chatbot__bubble--bot';
+        welcome.textContent = 'Hai! Lagi bingung pilih serial, cari info pemeran, atau mau pakai filter? Tanya saja.';
+        messages.appendChild(welcome);
+
+        input.value = '';
+        messages.removeAttribute('aria-busy');
+        form.querySelector('button[type="submit"]').disabled = false;
+        input.focus();
+    };
+
+    refreshButton?.addEventListener('click', refreshChat);
 
     const addBubble = (text, kind = 'bot') => {
         const bubble = document.createElement('div');
@@ -178,6 +201,8 @@
     const send = async (message) => {
         const trimmed = message.trim();
         if (!trimmed) return;
+        const requestController = new AbortController();
+        currentRequestController = requestController;
         addBubble(trimmed, 'user');
         input.value = '';
         form.querySelector('button[type="submit"]').disabled = true;
@@ -189,7 +214,8 @@
 
         try {
             const response = await fetch('/api/chat', {
-                method: 'POST',
+            method: 'POST',
+            signal: requestController.signal,
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
@@ -212,17 +238,36 @@
                 pending.appendChild(note);
             }
             addResults(pending, data.shows, data.moreShows);
-            addQuickReplies(pending, Array.isArray(data.shows) && data.shows.length > 0, data.quickReplies);
+
+        if (Array.isArray(data.relatedShows) && data.relatedShows.length > 0) {
+            const relatedSection = document.createElement('div');
+            relatedSection.className = 'chatbot__related';
+
+            const heading = document.createElement('strong');
+            heading.textContent = `Genre terkait: ${data.relatedGenres.join(', ')}`;
+
+            relatedSection.appendChild(heading);
+            addResults(relatedSection, data.relatedShows);
+            pending.appendChild(relatedSection);
+        }
+
+        addQuickReplies(pending, Array.isArray(data.shows) && data.shows.length > 0, data.quickReplies);
             addFeedback(pending, data.responseId);
-        } catch (error) {
+                } catch (error) {
+            if (error.name === 'AbortError') return;
+
             pending.classList.add('chatbot__bubble--error');
             pending.textContent = error.message || 'Terjadi kendala saat menghubungi chatbot.';
         } finally {
             window.clearTimeout(processingTimer);
-            messages.removeAttribute('aria-busy');
-            form.querySelector('button[type="submit"]').disabled = false;
-            input.focus();
-            messages.scrollTop = messages.scrollHeight;
+
+            if (currentRequestController === requestController) {
+                currentRequestController = null;
+                messages.removeAttribute('aria-busy');
+                form.querySelector('button[type="submit"]').disabled = false;
+                input.focus();
+                messages.scrollTop = messages.scrollHeight;
+            }
         }
     };
 
