@@ -43,3 +43,7 @@ Route::post('/api/chat', [ShowController::class, 'chat'])->middleware('throttle:
 Route::post('/api/chat/feedback', [ShowController::class, 'chatFeedback'])->middleware('throttle:30,1');
 
 Route::get('/api/category/{slug}', [ShowController::class, 'categoryShows']);
+
+Route::get('/api/locations/{wikidataId}', [ShowController::class, 'locationsApi'])
+    ->where('wikidataId', 'Q[0-9]+')
+    ->middleware('throttle:60,1');

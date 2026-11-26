@@ -164,9 +164,9 @@
     const keywords = entities(r.keywords);
     const platforms = entities(r.platform);
 
-    // baris meta di header
     const country = entities(r.countryOfOrigin)[0];
     const metaParts = [years && esc(years), country && entityLink(country, COUNTRY_URL)].filter(Boolean);
+    const locWikidataId = r.wikidataId ? String(r.wikidataId) : 'none';
 
     // Similar recommendation: 12 series yang sudah dihitung server
     const similar = ITV.SHOWS && !ITV.USING_PLACEHOLDER ? ITV.SHOWS : [];
@@ -274,6 +274,17 @@
                     <h2>Awards &amp; Recognition</h2>
                 </div>
                 <p class="awards__src">${esc(award)}</p>
+            </section>` : ''}
+
+            ${(r.wikidataId || country?.name) ? `<section class="locations" id="locations" data-wikidata-id="${esc(locWikidataId)}" data-country="${esc(country?.name || '')}">
+                <div class="locations__head">
+                    <h2>Filming &amp; Setting Locations</h2>
+                    <span class="reviews__count" id="locationCount" hidden></span>
+                </div>
+                <p class="reviews__empty" id="locationStatus">Loading locations from Wikidata...</p>
+                <div class="locations__map" id="locationMap" hidden></div>
+                <div class="chips chips--sm locations__chips" id="locationChips" hidden></div>
+                <p class="reviews__src">Location data from Wikidata (external RDF) &bull; Map &copy; OpenStreetMap contributors.</p>
             </section>` : ''}
 
             ${r.tmdbId ? `<section class="reviews" id="reviews" data-tmdb-id="${esc(r.tmdbId)}">
@@ -460,4 +471,83 @@
             })
             .finally(() => clearTimeout(timer));
     }
+
+  /*  Filming & Setting Locations (Wikidata external RDF + OpenStreetMap)  */
+    const locRoot = document.getElementById('locations');
+    if (locRoot) {
+        const locStatus = locRoot.querySelector('#locationStatus');
+        const locMapEl = locRoot.querySelector('#locationMap');
+        const locChips = locRoot.querySelector('#locationChips');
+        const locCount = locRoot.querySelector('#locationCount');
+        const fallbackCountry = locRoot.dataset.country || '';
+
+        const setLocMessage = (text) => {
+            if (!locStatus) return;
+            locStatus.textContent = text;
+            locStatus.hidden = false;
+            locMapEl.hidden = true;
+            locChips.hidden = true;
+        };
+
+        const roleLabel = (type) => {
+            if (type === 'narrative') return 'Set in';
+            if (type === 'country') return 'Country of origin';
+            return 'Filmed in';
+        };
+
+        if (!window.L) {
+            setLocMessage('Map library could not be loaded.');
+        } else {
+            const params = new URLSearchParams();
+            if (fallbackCountry) params.set('country', fallbackCountry);
+            const qs = params.toString() ? `?${params.toString()}` : '';
+
+            fetch(`/api/locations/${encodeURIComponent(locRoot.dataset.wikidataId)}${qs}`, { headers: { Accept: 'application/json' } })
+                .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+                .then((d) => {
+                    const items = Array.isArray(d.locations) ? d.locations : [];
+                    if (!items.length) {
+                        setLocMessage('No filming or setting location coordinates available on Wikidata for this series.');
+                        return;
+                    }
+
+                    if (locStatus) locStatus.hidden = true;
+                    locMapEl.hidden = false;
+                    locChips.hidden = false;
+                    locCount.textContent = items.length;
+                    locCount.hidden = false;
+
+                    const map = L.map(locMapEl, { scrollWheelZoom: false });
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 18,
+                        attribution: '&copy; OpenStreetMap contributors',
+                    }).addTo(map);
+
+                    const bounds = [];
+                    items.forEach((loc) => {
+                        const role = roleLabel(loc.type);
+                        L.marker([loc.lat, loc.lng])
+                            .addTo(map)
+                            .bindPopup(`<strong>${esc(loc.name)}</strong><br>${role} &bull; <a href="${esc(loc.uri)}" target="_blank" rel="noopener noreferrer">Wikidata</a>`);
+                        bounds.push([loc.lat, loc.lng]);
+                    });
+
+                    const isCountryOnly = items.length === 1 && items[0].type === 'country';
+                    if (bounds.length === 1) {
+                        map.setView(bounds[0], isCountryOnly ? 4 : 10);
+                    } else {
+                        map.fitBounds(bounds, { padding: [36, 36], maxZoom: 12 });
+                    }
+
+                    locChips.innerHTML = items.map((loc) => {
+                        const role = roleLabel(loc.type);
+                        return `<a class="chip chip--tag" href="${esc(loc.uri)}" target="_blank" rel="noopener noreferrer">${esc(loc.name)} <small>(${role})</small></a>`;
+                    }).join('');
+                })
+                .catch(() => {
+                    setLocMessage('Location data from Wikidata could not be loaded right now.');
+                });
+        }
+    }
+
 })();

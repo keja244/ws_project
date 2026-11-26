@@ -6,6 +6,12 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'ITV —  Top Rated TV Shows by IMDb')</title>
 
+    <meta property="og:site_name" content="ITV">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="@yield('title', 'ITV — Top Rated TV Shows by IMDb')">
+    <meta property="og:description" content="TV-Show catalog powered by Semantic Web (RDF/SPARQL), Wikidata, and TMDB.">
+    @stack('meta')
+
     <link rel="icon" type="image/svg+xml" href="{{ asset('images/favicon4.svg') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

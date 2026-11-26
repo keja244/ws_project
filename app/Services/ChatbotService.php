@@ -524,8 +524,23 @@ class ChatbotService
     ));
 
         if ($genres) {
+        try {
             $semanticResults = $this->searchSemanticGenre($genres, $genreMode);
-            $relatedGenres = $this->getRelatedSemanticGenres($genres);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return [
+                'answer' => 'Maaf, layanan pencarian semantik sedang tidak tersedia. Silakan coba lagi beberapa saat.',
+                'shows' => [],
+                'moreShows' => [],
+                'relatedGenres' => [],
+                'relatedShows' => [],
+                'searchUrl' => null,
+                'state' => $state,
+            ];
+        }
+
+        $relatedGenres = $this->getRelatedSemanticGenres($genres);
 
             if ($excludeGenres) {
             $relatedGenres = array_values(array_filter(
@@ -562,7 +577,12 @@ class ChatbotService
             $relatedMatches = [];
 
             if ($relatedGenres) {
+            try {
                 $relatedResults = $this->searchSemanticGenre($relatedGenres, 'or');
+            } catch (\Throwable $e) {
+                report($e);
+                $relatedResults = [];
+            }
 
                 $relatedIds = array_map(
                 fn (array $row) => trim($row['id'] ?? ''),
@@ -1530,7 +1550,20 @@ class ChatbotService
             }
         }
 
-        return array_values($found);
+        $normalized = [];
+
+        foreach ($found as $genre) {
+            $key = mb_strtolower(trim($genre));
+
+            if (in_array($key, ['sci-fi', 'science fiction', 'scifi'], true)) {
+                $normalized['science fiction'] = 'Science Fiction';
+                continue;
+            }
+
+            $normalized[$key] = $genre;
+        }
+
+        return array_values($normalized);
     }
 
     private function findExcludedGenres(string $query, array $shows): array
@@ -2619,6 +2652,7 @@ private function rankSimilar(array $title, array $matches, array $moods): array
         return (bool) array_intersect($left, $right);
     }
     
+
 private function searchSemanticGenre(array $genres, string $mode = 'and'): array
 {
     if (empty($genres)) {
@@ -2632,13 +2666,15 @@ private function searchSemanticGenre(array $genres, string $mode = 'and'): array
 
         $genreFilters[] = '
             EXISTS {
-                ?series schema:genre ?genre'.$index.' .
+                ?ontologyGenre'.$index.' a :Genre ;
+                    skos:prefLabel ?label'.$index.' ;
+                    skos:exactMatch ?datasetGenre'.$index.' .
+
                 FILTER(
-                    CONTAINS(
-                        LCASE(STR(?genre'.$index.')),
-                        "'.$genre.'"
-                    )
+                    LCASE(STR(?label'.$index.')) = "'.$genre.'"
                 )
+
+                ?series schema:genre ?datasetGenre'.$index.' .
             }
         ';
     }
@@ -2649,6 +2685,8 @@ private function searchSemanticGenre(array $genres, string $mode = 'and'): array
     );
 
     $query = '
+        PREFIX : <http://series-tv.com/ontology/>
+        PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
         PREFIX schema: <https://schema.org/>
 
         SELECT DISTINCT ?id ?name
@@ -2669,84 +2707,96 @@ private function searchSemanticGenre(array $genres, string $mode = 'and'): array
 }
 
 
-private function getRelatedSemanticGenres(array $genres): array
-{
-    if (empty($genres)) {
-        return [];
-    }
-
-    $genreValues = [];
-
-    foreach ($genres as $genre) {
-        $genre = SparqlService::esc(mb_strtolower(trim($genre)));
-
-        $genreValues[] = '"'.$genre.'"';
-    }
-
-    $values = implode(', ', $genreValues);
-
-    $query = '
-        PREFIX : <http://series-tv.com/ontology/>
-        PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-
-        SELECT DISTINCT ?relatedLabel
-        WHERE {
-            ?genre a :Genre ;
-                   skos:prefLabel ?label ;
-                   skos:related ?related .
-
-            ?related skos:prefLabel ?relatedLabel .
-
-            FILTER(LCASE(STR(?label)) IN ('.$values.'))
+    private function getRelatedSemanticGenres(array $genres): array
+    {
+        if (empty($genres)) {
+            return [];
         }
-    ';
 
-    try {
-        $results = $this->sparql->query($query);
-    } catch (\Throwable $e) {
-        return [];
-    }
+        $genreValues = [];
 
-    return array_values(array_unique(array_filter(
-        array_map(
+        foreach ($genres as $genre) {
+            $genre = SparqlService::esc(mb_strtolower(trim($genre)));
+
+            $genreValues[] = '"'.$genre.'"';
+        }
+
+        $values = implode(', ', $genreValues);
+
+        $query = '
+            PREFIX : <http://series-tv.com/ontology/>
+            PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+            SELECT DISTINCT ?relatedLabel
+            WHERE {
+                ?genre a :Genre ;
+                    skos:prefLabel ?label ;
+                    skos:related ?related .
+
+                ?related skos:prefLabel ?relatedLabel .
+
+                FILTER(LCASE(STR(?label)) IN ('.$values.'))
+            }
+        ';
+
+        try {
+            $results = $this->sparql->query($query);
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        $requestedGenres = array_fill_keys(
+            array_map(
+                fn ($genre) => mb_strtolower(trim($genre)),
+                $genres
+            ),
+            true
+        );
+
+        $relatedGenres = array_map(
             fn (array $row) => trim($row['relatedLabel'] ?? ''),
             $results
-        )
-    )));
-}
+        );
 
-private function getOntologyGenreAliases(): array
-{
-    $query = '
-        PREFIX : <http://series-tv.com/ontology/>
-        PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-
-        SELECT DISTINCT ?label ?alias
-        WHERE {
-            ?genre a :Genre ;
-                   skos:prefLabel ?label ;
-                   skos:altLabel ?alias .
-        }
-    ';
-
-    try {
-        $results = $this->sparql->query($query);
-    } catch (\Throwable $e) {
-        return [];
+        return array_values(array_unique(array_filter(
+            $relatedGenres,
+            fn ($genre) =>
+                $genre !== ''
+                && !isset($requestedGenres[mb_strtolower($genre)])
+        )));
     }
 
-    $aliases = [];
+    private function getOntologyGenreAliases(): array
+    {
+        $query = '
+            PREFIX : <http://series-tv.com/ontology/>
+            PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 
-    foreach ($results as $row) {
-        $alias = trim($row['alias'] ?? '');
-        $label = trim($row['label'] ?? '');
+            SELECT DISTINCT ?label ?alias
+            WHERE {
+                ?genre a :Genre ;
+                    skos:prefLabel ?label ;
+                    skos:altLabel ?alias .
+            }
+        ';
 
-        if ($alias !== '' && $label !== '') {
-            $aliases[mb_strtolower($alias)] = $label;
+        try {
+            $results = $this->sparql->query($query);
+        } catch (\Throwable $e) {
+            return [];
         }
+
+        $aliases = [];
+
+        foreach ($results as $row) {
+            $alias = trim($row['alias'] ?? '');
+            $label = trim($row['label'] ?? '');
+
+            if ($alias !== '' && $label !== '') {
+                $aliases[mb_strtolower($alias)] = $label;
+            }
+        }
+
+        return $aliases;
     }
-
-    return $aliases;
-}
-
 }
