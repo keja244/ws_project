@@ -53,6 +53,7 @@ class ChatbotService
         $query = $this->normalizeQuery($message);
         $shows = $this->uniqueShows($shows);
         $state = $this->normalizeState($state);
+                
         if ($this->isPromptInjection($query)) {
             return [
                 'answer' => 'Aku tidak bisa mengikuti instruksi untuk mengubah aturan atau membuka data internal. Aku tetap bisa bantu mencari serial dari katalog SeriesTV.',
@@ -61,6 +62,20 @@ class ChatbotService
                 'state' => $state,
             ];
         }
+
+        // Kenali keluhan atau koreksi dari pengguna.
+        if (preg_match(
+            '/\b(?:kamu salah|anda salah|bukan itu yang (?:saya|aku) maksud|hasil(?:nya)? tidak sesuai|jawaban(?:mu| anda)? (?:salah|kurang tepat)|salah memahami|tidak sesuai harapan|rekomendasi(?:mu| anda)? (?:salah|tidak sesuai))\b/u',
+            $query
+        )) {
+            return [
+                'answer' => 'Maaf, sepertinya aku salah memahami permintaanmu atau memberikan hasil yang kurang sesuai. Bisa jelaskan bagian mana yang perlu diperbaiki? Aku akan mencoba menyesuaikannya.',
+                'shows' => [],
+                'searchUrl' => null,
+                'state' => $state,
+            ];
+        }
+
         $premiseTitle = $this->findPremiseTitle($query, $shows);
         $unknownTitle = $this->findUnknownTitleCandidate($query, $shows);
 
@@ -103,7 +118,16 @@ class ChatbotService
         }
 
         $popularityIntent = preg_match('/\b(?:terkenal|populer|popular|famous|well-known)\b/u', $query) === 1;
-        $keepActiveFilters = preg_match('/\b(?:lanjutkan|pakai|gunakan|terapkan)\b.{0,50}\bfilter aktif\b/u', $query) === 1;
+
+        $continuationIntent = preg_match(
+            '/\b(?:naikkan|turunkan|ubah|ganti|tambahkan|tambah|hapus|hilangkan|kurangi|lanjutkan|pertahankan|tetap|jangan|pakai|gunakan|terapkan)\b/u',
+            $query
+        ) === 1;
+
+        $keepActiveFilters = preg_match(
+            '/\b(?:lanjutkan|pakai|gunakan|terapkan)\b.{0,50}\bfilter aktif\b/u',
+            $query
+        ) === 1;
         $globalPopularity = preg_match('/\b(?:secara global|global|tanpa filter|reset dan cari global)\b/u', $query) === 1;
         if ($globalPopularity) {
             $state = $this->emptyState();
@@ -203,6 +227,7 @@ class ChatbotService
         $ratingConstraint = $this->findRating($query);
         $rating = $ratingConstraint['value'];
         $ratingExclusive = $ratingConstraint['exclusive'];
+        $ratingMaximum = $ratingConstraint['maximum'];
         $ratingWasDefault = ! empty($ratingConstraint['default']);
         if ($popularityIntent && $ratingWasDefault) {
             $rating = null;
@@ -233,7 +258,20 @@ class ChatbotService
         $similarIntent = preg_match('/\b(?:mirip|seperti|similar|like|vibe|nuansa)\b/u', $query) === 1;
         $similarReference = $similarIntent ? $this->findSimilarityReference($query) : null;
         $mentionedActors = $this->findMentionedActors($query, $shows);
+        $actorIntent = preg_match('/\b(?:aktor|aktris|pemeran|dibintangi|dibintangi oleh|cast|starring|starred)\b/u', $query) === 1;
         $excludedTitles = $this->findExcludedTitles($query, $shows);
+
+        if ($actorIntent && ! $mentionedActors) {
+            return [
+                'answer' => 'Maaf, aktor yang kamu cari tidak ditemukan di katalog serial.',
+                'shows' => [],
+                'moreShows' => [],
+                'relatedGenres' => [],
+                'relatedShows' => [],
+                'searchUrl' => null,
+                'state' => $state,
+            ];
+        }
 
         if ($title && $excludedTitles && preg_match('/\b(?:pemeran|aktor|aktris|cast)\b.{0,60}\b(?:sama|serupa)\b|\b(?:sama|serupa)\b.{0,50}\b(?:pemeran|aktor|aktris|cast)\b/u', $query)) {
             return array_merge(
@@ -368,14 +406,27 @@ class ChatbotService
             ];
         }
 
-        if (! $keepActiveFilters && ($plotIntent || $this->shouldStartFreshSearch($query, $state, $genres, $title, $similarIntent))) {
+        $isNewFilterSearch = preg_match(
+            '/\b(?:cari|carikan|rekomendasikan|rekomendasi|tampilkan|tunjukkan|aku mau|saya mau|film|serial|series)\b/u',
+            $query
+        ) === 1;
+
+        if (
+            ! $keepActiveFilters
+            && ! $continuationIntent
+            && (
+                $plotIntent
+                || $isNewFilterSearch
+                || $this->shouldStartFreshSearch($query, $state, $genres, $title, $similarIntent)
+            )
+        ) {
             $state = $this->emptyState();
         }
         $sort = $this->findSort($query) ?? $state['sort'];
         $ambiguousPopularity = $popularityIntent
             && ! preg_match('/\b(?:urutkan|urutin|sortir)\b.{0,30}\b(?:rating|vote|suara|penilaian)\b|\b(?:jumlah|banyak)\s+(?:vote|suara|penilaian)\b/u', $query);
         $state = $this->mergeState($state, compact(
-            'genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'year', 'yearInclusive',
+            'genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'ratingMaximum', 'year', 'yearInclusive',
             'yearMax', 'yearMaxInclusive', 'seasonRange', 'episodeMax', 'endedOnly', 'westernOnly', 'durationMax',
             'shortEpisodes', 'familyFriendly', 'sort'
         ), $query);
@@ -454,7 +505,9 @@ class ChatbotService
         }
 
 
-        $filters = compact('genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'year', 'yearInclusive', 'yearMax', 'yearMaxInclusive', 'seasonRange', 'episodeMax', 'endedOnly', 'westernOnly', 'shortEpisodes', 'durationMax', 'familyFriendly');
+        $filters = compact('genres', 'excludeGenres', 'genreMode', 'platform', 'excludePlatform', 'country', 'excludeCountry', 'rating', 'ratingExclusive', 'ratingMaximum', 'year', 'yearInclusive', 'yearMax', 'yearMaxInclusive', 'seasonRange', 'episodeMax', 'endedOnly', 'westernOnly', 'shortEpisodes', 'durationMax', 'familyFriendly');
+
+        $filters['actors'] = $mentionedActors;
 
         $filters['excludeTitles'] = array_map(
             fn (array $show) => (string) ($show['id'] ?? ''),
@@ -560,7 +613,10 @@ class ChatbotService
 
         $hadNoStrictMatches = $matches === [];
         $results = array_slice($matches, 0, 9);
-        $criteria = $this->criteria($genres, $excludeGenres, $genreMode, $platform, $excludePlatform, $country, $excludeCountry, $rating, $ratingExclusive, $year, $yearInclusive, $yearMax, $yearMaxInclusive, $seasonRange, $episodeMax, $endedOnly, $westernOnly, $shortEpisodes, $durationMax, $moods);
+        $criteria = $this->criteria($genres, $excludeGenres, $genreMode, $platform, $excludePlatform, $country, $excludeCountry, $rating, $ratingExclusive, $ratingMaximum, $year, $yearInclusive, $yearMax, $yearMaxInclusive, $seasonRange, $episodeMax, $endedOnly, $westernOnly, $shortEpisodes, $durationMax, $moods);
+        if ($mentionedActors) {
+            array_unshift($criteria, 'aktor '.implode(', ', $mentionedActors));
+        }
         if ($familyFriendly) {
             array_unshift($criteria, 'ramah keluarga');
         }
@@ -707,6 +763,7 @@ class ChatbotService
             'excludeCountry' => [],
             'rating' => null,
             'ratingExclusive' => false,
+            'ratingMaximum' => false,
             'year' => null,
             'yearInclusive' => true,
             'yearMax' => null,
@@ -814,6 +871,7 @@ class ChatbotService
         if ($parsed['rating'] !== null) {
             $state['rating'] = $parsed['rating'];
             $state['ratingExclusive'] = $parsed['ratingExclusive'];
+            $state['ratingMaximum'] = $parsed['ratingMaximum'];
         }
         if ($parsed['year'] !== null || $parsed['yearMax'] !== null) {
             $state['year'] = $parsed['year'];
@@ -1019,7 +1077,9 @@ class ChatbotService
             $filters[] = 'asal '.implode('/', $state['country']);
         }
         if ($state['rating'] !== null) {
-            $filters[] = ($state['ratingExclusive'] ? 'rating di atas ' : 'rating minimal ').$state['rating'];
+            $filters[] = $state['ratingMaximum']
+            ? 'rating maksimal '.$state['rating']
+            : ($state['ratingExclusive'] ? 'rating di atas ' : 'rating minimal ').$state['rating'];
         }
         if ($state['platform']) {
             $filters[] = 'platform '.$state['platform'];
@@ -1176,19 +1236,44 @@ class ChatbotService
         return null;
     }
 
+    
     private function findMentionedActors(string $query, array $shows): array
     {
         $mentioned = [];
+
+        // Samakan format nama aktor dan pesan pengguna.
+        $normalizedQuery = preg_replace('/[-_]+/u', ' ', $query) ?? $query;
+        $normalizedQuery = preg_replace('/\s+/', ' ', $normalizedQuery);
+        $normalizedQuery = trim($normalizedQuery);
+
         foreach ($shows as $show) {
             foreach ($this->list((string) ($show['actor'] ?? '')) as $actor) {
-                if ($actor !== '' && preg_match('/(?<![\pL\pN])'.preg_quote(mb_strtolower($actor), '/').'(?![\pL\pN])/u', $query)) {
-                    $mentioned[mb_strtolower($actor)] = $actor;
+                $actor = trim($actor);
+
+                if ($actor === '') {
+                    continue;
+                }
+
+                $normalizedActor = mb_strtolower($actor);
+                $normalizedActor = preg_replace('/[-_]+/u', ' ', $normalizedActor) ?? $normalizedActor;
+                $normalizedActor = preg_replace('/\s+/', ' ', $normalizedActor);
+                $normalizedActor = trim($normalizedActor);
+
+                if (
+                    $normalizedActor !== ''
+                    && preg_match(
+                        '/(?<![\pL\pN])'.preg_quote($normalizedActor, '/').'(?![\pL\pN])/u',
+                        $normalizedQuery
+                    )
+                ) {
+                    $mentioned[$normalizedActor] = $actor;
                 }
             }
         }
 
         return array_values($mentioned);
     }
+
 
     private function findExcludedTitles(string $query, array $shows): array
     {
@@ -1579,32 +1664,64 @@ class ChatbotService
         return [];
     }
 
-    private function findRating(string $query): array
-    {
-        $number = '(\\d+(?:[.,]\\d+)?)(?!\\s*(?:season|seasons|musim|tahun|episode|episodes|menit|minutes|min\\b))';
-        if (preg_match('/(?:rating|nilai|imdb)[^\\d]{0,25}'.$number.'/u', $query, $match)) {
+    
+    
+        private function findRating(string $query): array
+        {
+            $number = '(\\d+(?:[.,]\\d+)?)';
+
+            // Rating minimal
+            if (preg_match('/(?:rating|nilai|imdb)\s*(?:minimal|minimum|paling sedikit|setidaknya|at least|>=)\s*'.$number.'/u', $query, $match)
+                || preg_match('/(?:minimal|minimum|paling sedikit|setidaknya|at least|>=)\s*(?:rating\s*)?'.$number.'/u', $query, $match)) {
+                return [
+                    'value' => (float) str_replace(',', '.', $match[1]),
+                    'exclusive' => false,
+                    'maximum' => false,
+                    'default' => false,
+                ];
+            }
+
+            // Rating di atas
+            if (preg_match('/(?:rating|nilai|imdb)\s*(?:di atas|lebih dari|above|over|greater than|>)\s*'.$number.'/u', $query, $match)
+                || preg_match('/(?:di atas|lebih dari|above|over|greater than|>)\s*(?:rating\s*)?'.$number.'/u', $query, $match)) {
+                return [
+                    'value' => (float) str_replace(',', '.', $match[1]),
+                    'exclusive' => true,
+                    'maximum' => false,
+                    'default' => false,
+                ];
+            }
+
+            // Rating maksimal
+            if (preg_match('/(?:rating|nilai|imdb)\s*(?:maksimal|maksimum|paling banyak|at most|up to|<=)\s*'.$number.'/u', $query, $match)
+                || preg_match('/(?:maksimal|maksimum|paling banyak|at most|up to|<=)\s*(?:rating\s*)?'.$number.'/u', $query, $match)) {
+                return [
+                    'value' => (float) str_replace(',', '.', $match[1]),
+                    'exclusive' => false,
+                    'maximum' => true,
+                    'default' => false,
+                ];
+            }
+
+            // Rating bagus atau tinggi
+            if (preg_match('/\b(?:rating(?:nya)?|nilai|imdb)\b.{0,20}\b(?:bagus|baik|tinggi|good|high)\b/u', $query)) {
+                return [
+                    'value' => 8.0,
+                    'exclusive' => false,
+                    'maximum' => false,
+                    'default' => true,
+                ];
+            }
+
             return [
-                'value' => (float) str_replace(',', '.', $match[1]),
-                'exclusive' => (bool) preg_match('/(?:di atas|lebih dari|above|over|greater than|>)/u', $match[0]),
+                'value' => null,
+                'exclusive' => false,
+                'maximum' => false,
                 'default' => false,
             ];
-        }
-        if (preg_match('/(?:di atas|lebih dari|above|over|greater than|at least|minimal|>=|>)\\s*(?:rating\\s*)?'.$number.'/u', $query, $match)) {
-            return [
-                'value' => (float) str_replace(',', '.', $match[1]),
-                'exclusive' => (bool) preg_match('/(?:di atas|lebih dari|above|over|greater than|>)/u', $match[0]),
-                'default' => false,
-            ];
-        }
-        if (preg_match('/\\b'.$number.'\\s*(?:ke atas|and above|\\+)/u', $query, $match)) {
-            return ['value' => (float) str_replace(',', '.', $match[1]), 'exclusive' => false, 'default' => false];
-        }
-        if (preg_match('/\b(?:rating(?:nya)?|nilai|imdb)\b.{0,20}\b(?:bagus|baik|tinggi|good|high)\b/u', $query)) {
-            return ['value' => 8.0, 'exclusive' => false, 'default' => true];
         }
 
-        return ['value' => null, 'exclusive' => false, 'default' => false];
-    }
+
 
     private function findDurationLimit(string $query): ?int
     {
@@ -1672,6 +1789,21 @@ class ChatbotService
             return false;
         }
         $showGenres = array_map('mb_strtolower', $this->list($show['genre'] ?? ''));
+        $showActors = array_map(
+            fn (string $actor) => mb_strtolower(trim($actor)),
+            $this->list($show['actor'] ?? '')
+        );
+
+        if (! empty($filters['actors'])) {
+            $actorMatches = array_map(
+                fn (string $actor) => mb_strtolower(trim($actor)),
+                $filters['actors']
+            );
+
+            if (! array_intersect($actorMatches, $showActors)) {
+                return false;
+            }
+        }
         // §8.1: dukung AND (default) atau OR saat pengguna menulis "atau/or".
         if (! empty($filters['genres'])) {
             $hits = 0;
@@ -1704,7 +1836,12 @@ class ChatbotService
         }
         if ($filters['rating'] !== null) {
             $showRating = (float) ($show['aggregateRating'] ?? 0);
-            if ($filters['ratingExclusive'] ? $showRating <= $filters['rating'] : $showRating < $filters['rating']) {
+
+            if ($filters['ratingMaximum']) {
+                if ($showRating > $filters['rating']) {
+                    return false;
+                }
+            } elseif ($filters['ratingExclusive'] ? $showRating <= $filters['rating'] : $showRating < $filters['rating']) {
                 return false;
             }
         }
@@ -1766,7 +1903,7 @@ class ChatbotService
         };
         $working = $filters;
 
-        if ($working['rating'] !== null && $working['rating'] > 0.2) {
+        if ($working['rating'] !== null && ! $working['ratingMaximum'] && $working['rating'] > 0.2) {
             $originalRating = (float) $working['rating'];
             for ($threshold = round($originalRating - 0.1, 1); $threshold >= round($originalRating - 0.2, 1); $threshold = round($threshold - 0.1, 1)) {
                 $working['rating'] = $threshold;
@@ -2349,7 +2486,7 @@ private function rankSimilar(array $title, array $matches, array $moods): array
         return 'Rating '.number_format((float) ($show['aggregateRating'] ?? 0), 1);
     }
 
-    private function criteria(array $genres, array $excludeGenres, string $genreMode, ?string $platform, array $excludePlatform, array $country, array $excludeCountry, ?float $rating, bool $ratingExclusive, ?int $year, bool $yearInclusive, ?int $yearMax, bool $yearMaxInclusive, array $seasonRange, ?int $episodeMax, bool $endedOnly, bool $westernOnly, bool $shortEpisodes, ?int $durationMax, array $moods): array
+    private function criteria(array $genres, array $excludeGenres, string $genreMode, ?string $platform, array $excludePlatform, array $country, array $excludeCountry, ?float $rating, bool $ratingExclusive, bool $ratingMaximum, ?int $year, bool $yearInclusive, ?int $yearMax, bool $yearMaxInclusive, array $seasonRange, ?int $episodeMax, bool $endedOnly, bool $westernOnly, bool $shortEpisodes, ?int $durationMax, array $moods): array
     {
         $criteria = [];
         if ($genres) {
@@ -2374,7 +2511,9 @@ private function rankSimilar(array $title, array $matches, array $moods): array
             $criteria[] = 'bukan asal '.implode('/', $excludeCountry);
         }
         if ($rating !== null) {
-            $criteria[] = $ratingExclusive ? "rating di atas {$rating}" : "rating minimal {$rating}";
+            $criteria[] = $ratingMaximum
+                ? "rating maksimal {$rating}"
+                : ($ratingExclusive ? "rating di atas {$rating}" : "rating minimal {$rating}");
         }
         if ($year !== null && $yearMax !== null) {
             $criteria[] = $yearInclusive ? 'rilis mulai '.$year : 'rilis setelah '.$year;

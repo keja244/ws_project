@@ -8,7 +8,12 @@
                 <strong>Serial consultant</strong>
                 <span>Ask about shows, cast, or filters</span>
             </div>
-            <button type="button" id="chatbotClose" aria-label="Close chat">×</button>
+            <div class="chatbot__head-actions">
+                <button type="button" id="chatbotRefresh" aria-label="Refresh chat" title="Mulai chat baru">
+                    ↻
+                </button>
+                <button type="button" id="chatbotClose" aria-label="Close chat">×</button>
+            </div>
         </header>
         <div class="chatbot__messages" id="chatbotMessages" aria-live="polite">
             <div class="chatbot__bubble chatbot__bubble--bot">Hai! Lagi bingung pilih serial, cari info pemeran, atau mau pakai filter? Tanya saja.</div>
